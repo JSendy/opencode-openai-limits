@@ -1,0 +1,11 @@
+*.zip
+*.log
+node_modules/
+.DS_Store
+
+# Local OpenCode runtime data. Never commit credentials or cache.
+auth.json
+openai-limits.json
+openai-limits.refresh
+openai-limits-login*.cmd
+openai-limits-*.cjs
