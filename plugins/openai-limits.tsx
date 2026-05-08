@@ -192,7 +192,10 @@ function resetLeft(value?: WindowInfo) {
 function reset(value?: WindowInfo) {
   if (!value?.resetAt) return "r ?"
   const ms = value.resetAt * 1000
-  const at = new Date(ms).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })
+  const date = new Date(ms)
+  const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()]
+  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+  const at = `${day} ${time}`
   return `r ${resetLeft(value)} ${at}`
 }
 
