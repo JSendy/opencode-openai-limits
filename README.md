@@ -14,11 +14,11 @@ Track ChatGPT Pro/Plus Codex usage, add provider logins, relogin accounts, and r
 
 <div align="center">
 
-<img src="docs/screenshots/preview.png" alt="OpenCode OpenAI limits overview" width="520">
+<img src="docs/screenshots/preview.png?v=a8ecf33" alt="OpenCode OpenAI limits overview" width="520">
 
 <p><strong>Limits at a glance.</strong> See every connected OpenAI account and its remaining Codex windows from the OpenCode home screen.</p>
 
-<img src="docs/screenshots/provider-management.png" alt="OpenAI provider management dialog" width="720">
+<img src="docs/screenshots/provider-management.png?v=a8ecf33" alt="OpenAI provider management dialog" width="720">
 
 <p><strong>Provider control.</strong> Relogin, refresh, or close the account dialog from one focused view.</p>
 
