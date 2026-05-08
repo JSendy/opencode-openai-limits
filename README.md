@@ -2,15 +2,11 @@
 
 # OpenCode OpenAI Limits
 
-**A multi-account OpenAI limits dashboard for OpenCode.**
+**Run multiple OpenAI accounts in OpenCode without guessing which one still has Codex quota.**
 
-Track ChatGPT Pro/Plus Codex usage across accounts, refresh quotas, and manage provider logins without leaving the OpenCode TUI.
+Track ChatGPT Pro/Plus Codex usage, add provider logins, relogin accounts, and refresh limits from one TUI panel.
 
-<p>
-  <img alt="OpenCode TUI plugin" src="https://img.shields.io/badge/OpenCode-TUI%20Plugin-111827?style=for-the-badge">
-  <img alt="Multi-account" src="https://img.shields.io/badge/OpenAI-Multi--Account-16a34a?style=for-the-badge">
-  <img alt="Credentials stay local" src="https://img.shields.io/badge/Auth-Local%20Only-f97316?style=for-the-badge">
-</p>
+<p><strong>OpenCode TUI plugin</strong> / <strong>Multi-account OpenAI</strong> / <strong>Credentials stay local</strong></p>
 
 </div>
 
