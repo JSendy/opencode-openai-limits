@@ -1,29 +1,51 @@
+<div align="center">
+
 # OpenCode OpenAI Limits
 
-OpenCode TUI plugin for tracking ChatGPT Pro/Plus Codex usage across multiple OpenAI accounts.
+**A multi-account OpenAI limits dashboard for OpenCode.**
 
-Use it when you work with several OpenAI accounts and need one place to see remaining limits, refresh usage, add providers, relogin, and remove accounts without hand-editing config files.
+Track ChatGPT Pro/Plus Codex usage across accounts, refresh quotas, and manage provider logins without leaving the OpenCode TUI.
+
+<p>
+  <img alt="OpenCode TUI plugin" src="https://img.shields.io/badge/OpenCode-TUI%20Plugin-111827?style=for-the-badge">
+  <img alt="Multi-account" src="https://img.shields.io/badge/OpenAI-Multi--Account-16a34a?style=for-the-badge">
+  <img alt="Credentials stay local" src="https://img.shields.io/badge/Auth-Local%20Only-f97316?style=for-the-badge">
+</p>
+
+</div>
 
 ## Preview
 
-Screenshot slots are already wired. Add these files and GitHub will render them here:
+<div align="center">
 
-- `docs/screenshots/preview.png` - main OpenAI limits panel.
-- `docs/screenshots/provider-management.png` - account/provider management dialog.
+<img src="docs/screenshots/preview.png" alt="OpenCode OpenAI limits overview" width="520">
 
-![OpenAI limits preview](docs/screenshots/preview.png)
+<p><strong>Limits at a glance.</strong> See every connected OpenAI account and its remaining Codex windows from the OpenCode home screen.</p>
 
-![Provider management](docs/screenshots/provider-management.png)
+<img src="docs/screenshots/provider-management.png" alt="OpenAI provider management dialog" width="720">
+
+<p><strong>Provider control.</strong> Relogin, refresh, or close the account dialog from one focused view.</p>
+
+</div>
+
+## Why
+
+- Use multiple OpenAI accounts without losing track of remaining Codex limits.
+- Add and relogin providers from the TUI instead of hand-editing config files.
+- Keep every developer's credentials local to their own OpenCode auth store.
+- Refresh usage in the background without blocking your OpenCode session.
 
 ## Features
 
-- Shows remaining ChatGPT Pro/Plus Codex usage inside OpenCode.
-- Discovers OpenAI providers from OpenCode config and local auth.
-- Adds new OpenAI providers from the TUI with `/limits-add`.
-- Opens browser OAuth login for each provider.
-- Supports relogin and remove actions from the provider dialog.
-- Keeps credentials local in OpenCode's own auth store.
-- Uses a background writer plugin so usage stays fresh without blocking the TUI.
+| Area | What it does |
+| --- | --- |
+| Limits | Shows remaining ChatGPT Pro/Plus Codex usage inside OpenCode. |
+| Providers | Discovers OpenAI providers from OpenCode config and local auth. |
+| Multi-account | Adds new OpenAI providers from the TUI with `/limits-add`. |
+| Login | Opens browser OAuth login for each provider. |
+| Management | Supports relogin, refresh, and remove actions from the provider dialog. |
+| Safety | Keeps credentials local in OpenCode's own auth store. |
+| Background refresh | Uses a writer plugin so usage stays fresh without blocking the TUI. |
 
 ## Commands
 
