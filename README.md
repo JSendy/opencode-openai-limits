@@ -52,7 +52,15 @@ Track ChatGPT Pro/Plus Codex usage, add provider logins, relogin accounts, and r
 
 ## Install
 
-Clone this repo or download the files, then run from the repo root:
+Clone this repo or download the files, then run the installer for your OS from the repo root.
+
+macOS:
+
+```sh
+sh ./install.sh
+```
+
+Windows:
 
 ```powershell
 .\install.ps1
@@ -61,10 +69,11 @@ Clone this repo or download the files, then run from the repo root:
 This copies the plugin files into:
 
 ```text
-%USERPROFILE%\.config\opencode\plugins
+macOS:  ~/.config/opencode/plugins
+Windows: %USERPROFILE%\.config\opencode\plugins
 ```
 
-Add the background writer plugin to `%USERPROFILE%\.config\opencode\opencode.jsonc`:
+Add the background writer plugin to your OpenCode `opencode.jsonc`:
 
 ```jsonc
 {
@@ -74,7 +83,7 @@ Add the background writer plugin to `%USERPROFILE%\.config\opencode\opencode.jso
 
 If you already have a `plugin` array, append `"./plugins/openai-limits-writer.ts"` to it.
 
-Add the TUI plugin to `%USERPROFILE%\.config\opencode\tui.jsonc`:
+Add the TUI plugin to your OpenCode `tui.jsonc`:
 
 ```jsonc
 {
@@ -101,6 +110,7 @@ The plugin creates provider config automatically and stores the OAuth credential
 - `plugins/openai-limits.tsx` - TUI panel, dialogs, add/login/relogin/remove actions.
 - `plugins/openai-limits-writer.ts` - background usage cache writer.
 - `plugins/openai-limits-shared.ts` - shared config, auth discovery, and provider helpers.
+- `install.sh` - local installer for macOS shells.
 - `install.ps1` - local installer for Windows PowerShell.
 
 ## Security
@@ -113,7 +123,13 @@ Do not commit or share these local runtime files:
 - `%USERPROFILE%\.local\share\opencode\openai-limits.json`
 - `%USERPROFILE%\.local\share\opencode\openai-limits.refresh`
 - `%USERPROFILE%\.local\share\opencode\openai-limits-login*.cmd`
+- `%USERPROFILE%\.local\share\opencode\openai-limits-login*.sh`
 - `%USERPROFILE%\.local\share\opencode\openai-limits-*.cjs`
+- `~/.local/share/opencode/auth.json`
+- `~/.local/share/opencode/openai-limits.json`
+- `~/.local/share/opencode/openai-limits.refresh`
+- `~/.local/share/opencode/openai-limits-login*.sh`
+- `~/.local/share/opencode/openai-limits-*.cjs`
 
 OpenCode stores each developer's local OAuth credentials in their own `auth.json` after browser login.
 
@@ -121,6 +137,6 @@ The plugin contains a public OpenAI OAuth app id used by OpenCode browser login.
 
 ## Notes
 
-- Tested on Windows with OpenCode's TUI plugin system.
+- Supports Windows and macOS launchers for browser login.
 - The usage data is cached locally and can be rebuilt with `/limits-refresh`.
 - Removing a provider deletes its provider config and its local credential for that provider id.

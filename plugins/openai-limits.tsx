@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { spawn } from "node:child_process"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { createSignal } from "solid-js"
@@ -270,6 +270,10 @@ function cmdArg(value: string) {
   return `"${value.replace(/"/g, '""')}"`
 }
 
+function shellArg(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`
+}
+
 function loginRunnerScript() {
   const file = join(DATA_DIR, "openai-limits-login-runner.cjs")
   writeFileSync(
@@ -407,7 +411,46 @@ function launchLogin(providerID: string) {
     }
 
     if (process.platform === "darwin") {
-      const command = loginCommand()
+      mkdirSync(DATA_DIR, { recursive: true })
+      const runnerScript = loginRunnerScript()
+      const copyScript = loginCopyScript()
+      const tempData = join(tmpdir(), "opencode", "openai-limits-login", safeFolderName(providerID))
+      const tempAuth = join(tempData, "opencode", "auth.json")
+      const script = join(DATA_DIR, "openai-limits-login.sh")
+      writeFileSync(
+        script,
+        [
+          "#!/bin/sh",
+          "set -u",
+          `echo ${shellArg(`OpenCode OpenAI login for ${providerID}`)}`,
+          `rm -rf -- ${shellArg(tempData)}`,
+          ["node", runnerScript, tempData].map(shellArg).join(" "),
+          "if [ $? -ne 0 ]; then",
+          "  echo",
+          `  echo ${shellArg("Login failed. Keep this window open and retry from OpenCode.")}`,
+          `  printf ${shellArg("Press enter to close...")}`,
+          "  read _unused",
+          "  exit 1",
+          "fi",
+          ["node", copyScript, tempAuth, AUTH_FILE, providerID, REFRESH_REQUEST_FILE].map(shellArg).join(" "),
+          "if [ $? -ne 0 ]; then",
+          "  echo",
+          `  echo ${shellArg("Login failed. Keep this window open and retry from OpenCode.")}`,
+          `  printf ${shellArg("Press enter to close...")}`,
+          "  read _unused",
+          "  exit 1",
+          "fi",
+          `rm -rf -- ${shellArg(tempData)}`,
+          "echo",
+          `echo ${shellArg("Login complete. You can close this window.")}`,
+          `printf ${shellArg("Press enter to close...")}`,
+          "read _unused",
+          "",
+        ].join("\n"),
+        "utf8",
+      )
+      chmodSync(script, 0o700)
+      const command = ["sh", script].map(shellArg).join(" ")
       const child = spawn("osascript", ["-e", `tell application "Terminal" to do script ${JSON.stringify(command)}`], {
         detached: true,
         stdio: "ignore",

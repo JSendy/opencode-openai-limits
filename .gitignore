@@ -8,4 +8,5 @@ auth.json
 openai-limits.json
 openai-limits.refresh
 openai-limits-login*.cmd
+openai-limits-login*.sh
 openai-limits-*.cjs

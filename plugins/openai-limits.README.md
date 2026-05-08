@@ -10,7 +10,17 @@ OpenCode TUI plugin for ChatGPT Pro/Plus Codex usage limits.
 
 ## Install
 
-Copy these three plugin files into `~/.config/opencode/plugins`.
+Copy these three plugin files into `~/.config/opencode/plugins`, or run the installer from the repository root:
+
+```sh
+sh ./install.sh
+```
+
+On Windows:
+
+```powershell
+.\install.ps1
+```
 
 Add the writer plugin to `~/.config/opencode/opencode.jsonc`:
 
