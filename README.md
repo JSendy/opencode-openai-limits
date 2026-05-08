@@ -6,15 +6,14 @@ Use it when you work with several OpenAI accounts and need one place to see rema
 
 ## Preview
 
-Add screenshots here before publishing a polished release:
+Screenshot slots are already wired. Add these files and GitHub will render them here:
 
 - `docs/screenshots/preview.png` - main OpenAI limits panel.
 - `docs/screenshots/provider-management.png` - account/provider management dialog.
 
-```md
 ![OpenAI limits preview](docs/screenshots/preview.png)
+
 ![Provider management](docs/screenshots/provider-management.png)
-```
 
 ## Features
 
