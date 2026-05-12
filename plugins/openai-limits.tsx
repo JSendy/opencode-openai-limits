@@ -689,8 +689,8 @@ function renderAddProviderDialog(api: TuiPluginApi) {
   api.ui.dialog.replace(() => (
     <DialogPrompt
       title="Add OpenAI provider"
-      placeholder="openai-work"
-      description={() => <text>Creates provider config and opens ChatGPT Pro/Plus browser login.</text>}
+      placeholder="A7 or work"
+      description={() => <text>Creates the next openai-account provider and opens ChatGPT Pro/Plus browser login.</text>}
       onConfirm={(value) => {
         try {
           const provider = addOpenAIProvider(value)

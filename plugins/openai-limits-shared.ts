@@ -168,11 +168,22 @@ export function isSafeProviderID(value: string) {
 
 export function providerNameFromID(id: string) {
   if (id === "openai") return "OpenAI"
+  const accountNumber = openAIAccountNumber(id)
+  if (accountNumber) return `OpenAI Account ${accountNumber}`
   return id
     .split(/[._-]+/)
     .filter(Boolean)
     .map((part) => part.slice(0, 1).toUpperCase() + part.slice(1))
     .join(" ")
+}
+
+function openAIAccountNumber(id: string) {
+  const match = id.trim().match(/^(?:openai-account-|A)(\d+)$/i)
+  return match ? Number(match[1]) : undefined
+}
+
+function isCanonicalOpenAIProviderID(id: string) {
+  return id === "openai" || /^openai-account-\d+$/.test(id)
 }
 
 function isOpenAIProviderConfig(id: string, provider?: ProviderConfig) {
@@ -188,9 +199,7 @@ function isOpenAIProviderConfig(id: string, provider?: ProviderConfig) {
 function isOpenAIAuthCandidate(id: string, auth: Auth, provider?: ProviderConfig) {
   if (auth.type !== "oauth") return false
   if (isOpenAIProviderConfig(id, provider)) return true
-  if (id === "openai" || id.startsWith("openai")) return true
-  const claims = parseJwtClaims(auth.access)
-  return Boolean(claims?.chatgpt_account_id || claims?.["https://api.openai.com/auth"]?.chatgpt_account_id)
+  return isCanonicalOpenAIProviderID(id)
 }
 
 export function discoverOpenAIAccounts(authMap = readAuthMap()) {
@@ -248,23 +257,37 @@ function templateModels(config: OpenCodeConfig) {
 }
 
 export function addOpenAIProvider(providerID: string, name = providerNameFromID(providerID)) {
-  const id = providerID.trim()
-  if (!isSafeProviderID(id)) throw new Error("provider id must use letters, numbers, dot, dash, or underscore")
-
+  const rawID = providerID.trim()
   const config = readConfig()
+  const authMap = readAuthMap()
   config.provider = config.provider || {}
+  const id = canonicalProviderID(rawID, config, authMap)
+  const resolvedName = rawID ? providerNameFromID(rawID) : providerNameFromID(id)
+  if (!isSafeProviderID(id)) throw new Error("provider id must use letters, numbers, dot, dash, or underscore")
   if (config.provider[id]) throw new Error(`provider '${id}' already exists`)
 
   config.provider[id] = {
     npm: OPENAI_PROVIDER_NPM,
-    name,
+    name: name || resolvedName,
     options: {
       baseURL: "https://api.openai.com/v1",
     },
     models: templateModels(config),
   }
   writeConfig(config)
-  return { id, name }
+  return { id, name: name || resolvedName }
+}
+
+function canonicalProviderID(input: string, config: OpenCodeConfig, authMap: Record<string, Auth>) {
+  const accountNumber = openAIAccountNumber(input)
+  if (accountNumber) return `openai-account-${accountNumber}`
+  const used = new Set([...Object.keys(config.provider || {}), ...Object.keys(authMap)])
+  let max = 0
+  for (const id of used) max = Math.max(max, openAIAccountNumber(id) || 0)
+  for (let index = max + 1; ; index++) {
+    const id = `openai-account-${index}`
+    if (!used.has(id)) return id
+  }
 }
 
 function writeJson(file: string, value: unknown) {

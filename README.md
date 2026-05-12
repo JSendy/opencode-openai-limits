@@ -98,12 +98,12 @@ Restart OpenCode after installing.
 ## Multi-Account Flow
 
 1. Run `/limits-add`.
-2. Enter a provider id, for example `openai-work` or `openai-alt`.
+2. Enter a short label or account number, for example `work` or `A7`.
 3. Finish the browser login with the OpenAI account you want attached to that provider.
 4. Run `/limits-refresh`.
 5. Click any provider row later to relogin, refresh, or remove it.
 
-The plugin creates provider config automatically and stores the OAuth credential under that provider id in your local OpenCode auth file.
+The plugin creates a canonical OpenCode OAuth provider id like `openai-account-7` automatically and stores the OAuth credential under that provider id in your local OpenCode auth file.
 
 ## Files
 
