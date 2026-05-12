@@ -1,4 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
+import { createServer } from "node:http"
+import os from "node:os"
 import { dirname } from "node:path"
 import type { Plugin } from "@opencode-ai/plugin"
 import {
@@ -23,6 +25,9 @@ const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 const ISSUER = "https://auth.openai.com"
 const RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
 const USAGE_URL = "https://chatgpt.com/backend-api/codex/usage"
+const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"
+const OAUTH_PORT = 1455
+const OAUTH_POLLING_SAFETY_MARGIN_MS = 3000
 const REFRESH_MS = 2 * 60 * 1000
 const HTTP_TIMEOUT_MS = 12_000
 
@@ -32,6 +37,28 @@ let pending = false
 let lastRefreshRequestMtime = 0
 const STARTED_KEY = Symbol.for("opencode.openai-limits-writer.started")
 
+type TokenResponse = {
+  id_token?: string
+  access_token: string
+  refresh_token: string
+  expires_in?: number
+}
+
+type PkceCodes = {
+  verifier: string
+  challenge: string
+}
+
+type PendingOAuth = {
+  pkce: PkceCodes
+  state: string
+  resolve: (tokens: TokenResponse) => void
+  reject: (error: Error) => void
+}
+
+let oauthServer: ReturnType<typeof createServer> | undefined
+let pendingOAuth: PendingOAuth | undefined
+
 async function fetchTimeout(input: RequestInfo | URL, init?: RequestInit) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS)
@@ -40,6 +67,121 @@ async function fetchTimeout(input: RequestInfo | URL, init?: RequestInit) {
   } finally {
     clearTimeout(timeout)
   }
+}
+
+function randomString(length: number) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+  const bytes = crypto.getRandomValues(new Uint8Array(length))
+  return Array.from(bytes)
+    .map((byte) => chars[byte % chars.length])
+    .join("")
+}
+
+function base64Url(buffer: ArrayBuffer) {
+  return Buffer.from(buffer).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+}
+
+async function generatePKCE(): Promise<PkceCodes> {
+  const verifier = randomString(43)
+  const data = new TextEncoder().encode(verifier)
+  const hash = await crypto.subtle.digest("SHA-256", data)
+  return { verifier, challenge: base64Url(hash) }
+}
+
+function buildAuthorizeUrl(redirectUri: string, pkce: PkceCodes, state: string) {
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: CLIENT_ID,
+    redirect_uri: redirectUri,
+    scope: "openid profile email offline_access",
+    code_challenge: pkce.challenge,
+    code_challenge_method: "S256",
+    id_token_add_organizations: "true",
+    codex_cli_simplified_flow: "true",
+    state,
+    originator: "opencode",
+  })
+  return `${ISSUER}/oauth/authorize?${params.toString()}`
+}
+
+async function exchangeCodeForTokens(code: string, redirectUri: string, pkce: PkceCodes): Promise<TokenResponse> {
+  const response = await fetchTimeout(`${ISSUER}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      client_id: CLIENT_ID,
+      code_verifier: pkce.verifier,
+    }).toString(),
+  })
+  if (!response.ok) throw new Error(`token exchange HTTP ${response.status}`)
+  return response.json()
+}
+
+async function startOAuthServer() {
+  if (oauthServer) return { redirectUri: `http://localhost:${OAUTH_PORT}/auth/callback` }
+  oauthServer = createServer((req, res) => {
+    const url = new URL(req.url || "/", `http://localhost:${OAUTH_PORT}`)
+    if (url.pathname !== "/auth/callback") {
+      res.writeHead(404)
+      res.end("not found")
+      return
+    }
+
+    const error = url.searchParams.get("error")
+    const code = url.searchParams.get("code")
+    const state = url.searchParams.get("state")
+    if (error || !code || !pendingOAuth || state !== pendingOAuth.state) {
+      const message = error || (!code ? "missing authorization code" : "invalid oauth state")
+      pendingOAuth?.reject(new Error(message))
+      pendingOAuth = undefined
+      res.writeHead(400, { "Content-Type": "text/html" })
+      res.end(`<h1>Authorization failed</h1><p>${message}</p>`)
+      return
+    }
+
+    const current = pendingOAuth
+    pendingOAuth = undefined
+    exchangeCodeForTokens(code, `http://localhost:${OAUTH_PORT}/auth/callback`, current.pkce)
+      .then(current.resolve)
+      .catch(current.reject)
+    res.writeHead(200, { "Content-Type": "text/html" })
+    res.end("<h1>Authorization successful</h1><p>You can close this window and return to OpenCode.</p>")
+  })
+  await new Promise<void>((resolve, reject) => {
+    oauthServer!.listen(OAUTH_PORT, resolve)
+    oauthServer!.on("error", reject)
+  })
+  return { redirectUri: `http://localhost:${OAUTH_PORT}/auth/callback` }
+}
+
+function stopOAuthServer() {
+  oauthServer?.close()
+  oauthServer = undefined
+}
+
+function waitForOAuthCallback(pkce: PkceCodes, state: string): Promise<TokenResponse> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pendingOAuth = undefined
+      reject(new Error("OAuth callback timeout"))
+    }, 5 * 60 * 1000)
+
+    pendingOAuth = {
+      pkce,
+      state,
+      resolve: (tokens) => {
+        clearTimeout(timeout)
+        resolve(tokens)
+      },
+      reject: (error) => {
+        clearTimeout(timeout)
+        reject(error)
+      },
+    }
+  })
 }
 
 async function refreshToken(providerID: string, auth: Auth) {
@@ -299,9 +441,151 @@ function startWriter() {
   setInterval(pollRefreshRequest, 1000)
 }
 
+function removeAuthorization(headers: HeadersInit | undefined) {
+  if (!headers) return headers
+  if (headers instanceof Headers) {
+    headers.delete("authorization")
+    headers.delete("Authorization")
+    return headers
+  }
+  if (Array.isArray(headers)) return headers.filter(([key]) => key.toLowerCase() !== "authorization")
+  delete (headers as Record<string, string>)["authorization"]
+  delete (headers as Record<string, string>)["Authorization"]
+  return headers
+}
+
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content
+  if (!Array.isArray(content)) return ""
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part
+      if (!part || typeof part !== "object") return ""
+      const record = part as Record<string, unknown>
+      return typeof record.text === "string" ? record.text : typeof record.content === "string" ? record.content : ""
+    })
+    .filter(Boolean)
+    .join("\n")
+}
+
+function withCodexInstructions(parsed: URL, init: RequestInit | undefined): RequestInit | undefined {
+  if (!parsed.pathname.includes("/v1/responses") || typeof init?.body !== "string") return init
+
+  try {
+    const body = JSON.parse(init.body) as Record<string, any>
+    if (body.instructions || !Array.isArray(body.input)) return init
+
+    const instructions: string[] = []
+    const input = []
+    for (const item of body.input) {
+      if (item?.role === "developer" || item?.role === "system") {
+        const text = contentText(item.content)
+        if (text) instructions.push(text)
+        continue
+      }
+      input.push(item)
+    }
+
+    if (!instructions.length) return init
+    return {
+      ...init,
+      body: JSON.stringify({
+        ...body,
+        instructions: instructions.join("\n\n"),
+        input: input.length ? input : body.input,
+      }),
+    }
+  } catch {
+    return init
+  }
+}
+
+function codexAuthHooks(input: Parameters<Plugin>[0], providerID: string) {
+  return {
+    auth: {
+      provider: providerID,
+      async loader(getAuth) {
+        const auth = await getAuth()
+        if (auth.type !== "oauth") return {}
+        return {
+          apiKey: OAUTH_DUMMY_KEY,
+          async fetch(requestInput: RequestInfo | URL, init?: RequestInit) {
+            if (init?.headers) init.headers = removeAuthorization(init.headers)
+            const current = (await getAuth()) as Auth
+            if (current.type !== "oauth") return fetch(requestInput, init)
+
+            const token = await refreshToken(providerID, current)
+            if (token !== current) {
+              await input.client.auth.set({
+                path: { id: providerID },
+                body: {
+                  type: "oauth",
+                  refresh: token.refresh!,
+                  access: token.access!,
+                  expires: token.expires!,
+                  ...(token.accountId ? { accountId: token.accountId } : {}),
+                },
+              })
+            }
+
+            const headers = new Headers(init?.headers)
+            headers.set("authorization", `Bearer ${token.access}`)
+            if (token.accountId) headers.set("ChatGPT-Account-Id", token.accountId)
+
+            const parsed = requestInput instanceof URL ? requestInput : new URL(typeof requestInput === "string" ? requestInput : requestInput.url)
+            const nextInit = withCodexInstructions(parsed, init)
+            const url = parsed.pathname.includes("/v1/responses") || parsed.pathname.includes("/chat/completions") ? new URL(RESPONSES_URL) : parsed
+            return fetch(url, { ...nextInit, headers })
+          },
+        }
+      },
+      methods: [
+        {
+          label: "ChatGPT Pro/Plus (browser)",
+          type: "oauth" as const,
+          authorize: async () => {
+            const { redirectUri } = await startOAuthServer()
+            const pkce = await generatePKCE()
+            const state = base64Url(crypto.getRandomValues(new Uint8Array(32)).buffer)
+            const callbackPromise = waitForOAuthCallback(pkce, state)
+            return {
+              url: buildAuthorizeUrl(redirectUri, pkce, state),
+              instructions: "Complete authorization in your browser. This window will close automatically.",
+              method: "auto" as const,
+              callback: async () => {
+                const tokens = await callbackPromise
+                stopOAuthServer()
+                return {
+                  type: "success" as const,
+                  refresh: tokens.refresh_token,
+                  access: tokens.access_token,
+                  expires: Date.now() + (tokens.expires_in ?? 3600) * 1000,
+                  accountId: accountIDFromClaims(parseJwtClaims(tokens.id_token || tokens.access_token)),
+                }
+              },
+            }
+          },
+        },
+        { label: "Manually enter API Key", type: "api" as const },
+      ],
+    },
+    "chat.headers": async (chatInput, output) => {
+      if (chatInput.model.providerID !== providerID) return
+      output.headers.originator = "opencode"
+      output.headers["User-Agent"] = `opencode (${os.platform()} ${os.release()}; ${os.arch()})`
+      output.headers.session_id = chatInput.sessionID
+    },
+    "chat.params": async (chatInput, output) => {
+      if (chatInput.model.providerID !== providerID) return
+      output.maxOutputTokens = undefined
+    },
+  } satisfies Awaited<ReturnType<Plugin>>
+}
+
 startWriter()
 
-export const OpenAILimitsWriterPlugin: Plugin = async () => {
+export const OpenAILimitsWriterPlugin: Plugin = async (input, options) => {
   startWriter()
-  return {}
+  const providerID = typeof options?.providerID === "string" ? options.providerID : undefined
+  return providerID ? codexAuthHooks(input, providerID) : {}
 }

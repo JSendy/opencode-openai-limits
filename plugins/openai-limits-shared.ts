@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
+import { pathToFileURL } from "node:url"
 
 export type Auth = {
   type: string
@@ -32,6 +33,7 @@ type ProviderConfig = {
 
 type OpenCodeConfig = {
   $schema?: string
+  plugin?: Array<string | [string, Record<string, unknown>]>
   provider?: Record<string, ProviderConfig>
   [key: string]: unknown
 }
@@ -43,6 +45,8 @@ export const CACHE_FILE = join(DATA_DIR, "openai-limits.json")
 export const REFRESH_REQUEST_FILE = join(DATA_DIR, "openai-limits.refresh")
 export const OPENAI_PROVIDER_NPM = "@ai-sdk/openai"
 export const OPENAI_LOGIN_METHOD = "ChatGPT Pro/Plus (browser)"
+const WRITER_PLUGIN_FILE = "./plugins/openai-limits-writer.ts"
+const WRITER_PLUGIN_PATH = join(dirname(CONFIG_FILE), "plugins", "openai-limits-writer.ts")
 
 const DEFAULT_MODEL_ID = "gpt-5.5"
 
@@ -256,6 +260,61 @@ function templateModels(config: OpenCodeConfig) {
   return defaultModels()
 }
 
+function writerAuthPluginSpec(providerID: string) {
+  const url = pathToFileURL(WRITER_PLUGIN_PATH)
+  url.searchParams.set("providerID", providerID)
+  return url.href
+}
+
+function isWriterPluginSpecifier(spec: string) {
+  if (spec === WRITER_PLUGIN_FILE) return true
+  try {
+    const url = new URL(spec)
+    url.search = ""
+    return url.href === pathToFileURL(WRITER_PLUGIN_PATH).href
+  } catch {
+    return false
+  }
+}
+
+function authPluginProviderID(item: string | [string, Record<string, unknown>]) {
+  if (Array.isArray(item)) {
+    if (isWriterPluginSpecifier(item[0]) && typeof item[1]?.providerID === "string") return item[1].providerID
+    return undefined
+  }
+
+  try {
+    const url = new URL(item)
+    return url.searchParams.get("providerID") || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function isPlainWriterPlugin(item: string | [string, Record<string, unknown>]) {
+  if (Array.isArray(item)) return false
+  if (item === WRITER_PLUGIN_FILE) return true
+  try {
+    const url = new URL(item)
+    return url.href === pathToFileURL(WRITER_PLUGIN_PATH).href
+  } catch {
+    return false
+  }
+}
+
+function ensureAuthPluginEntry(config: OpenCodeConfig, providerID: string) {
+  const authSpec = writerAuthPluginSpec(providerID)
+  const plugins = Array.isArray(config.plugin) ? config.plugin.filter((item) => authPluginProviderID(item) !== providerID) : []
+  if (!plugins.includes(WRITER_PLUGIN_FILE)) plugins.push(WRITER_PLUGIN_FILE)
+  plugins.push([authSpec, { providerID }])
+  config.plugin = plugins
+}
+
+function removeAuthPluginEntry(config: OpenCodeConfig, providerID: string) {
+  if (!Array.isArray(config.plugin)) return
+  config.plugin = config.plugin.filter((item) => authPluginProviderID(item) !== providerID || isPlainWriterPlugin(item))
+}
+
 export function addOpenAIProvider(providerID: string, name = providerNameFromID(providerID)) {
   const rawID = providerID.trim()
   const config = readConfig()
@@ -274,6 +333,7 @@ export function addOpenAIProvider(providerID: string, name = providerNameFromID(
     },
     models: templateModels(config),
   }
+  ensureAuthPluginEntry(config, id)
   writeConfig(config)
   return { id, name: name || resolvedName }
 }
@@ -303,6 +363,7 @@ export function removeOpenAIProvider(providerID: string) {
   const config = readConfigForWrite()
   const removedProvider = Boolean(config.provider?.[id])
   if (config.provider) delete config.provider[id]
+  removeAuthPluginEntry(config, id)
   writeConfig(config)
 
   const authMap = readAuthMapForWrite()
@@ -326,4 +387,9 @@ export function removeOpenAIProvider(providerID: string) {
 
   writeJson(REFRESH_REQUEST_FILE, { requestedAt: Date.now() })
   return { id, removedProvider, removedAuth, removedCache }
+}
+
+export default {
+  id: "openai-limits-shared",
+  server: async () => ({}),
 }

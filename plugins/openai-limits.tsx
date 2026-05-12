@@ -673,6 +673,7 @@ function renderLoginDialog(api: TuiPluginApi, state: Extract<DialogState, { type
         <text>{state.providerName}</text>
         <text fg={state.launched ? skin.ok : skin.warn}>{state.launched ? "Login terminal opened. Finish browser auth, then refresh." : "Run command manually, finish browser auth, then refresh."}</text>
         <text fg={skin.muted}>Browser auth uses built-in OpenAI, then saves credential as {state.providerID}.</text>
+        <text fg={skin.warn}>Restart OpenCode after adding a provider before using it as a model. Refresh only updates limits.</text>
         <text fg={skin.muted}>{command}</text>
         <box flexDirection="row" gap={1}>
           <ActionButton api={api} label="refresh now" primary onClick={() => requestRefresh(api)} />
@@ -690,10 +691,11 @@ function renderAddProviderDialog(api: TuiPluginApi) {
     <DialogPrompt
       title="Add OpenAI provider"
       placeholder="A7 or work"
-      description={() => <text>Creates the next openai-account provider and opens ChatGPT Pro/Plus browser login.</text>}
+      description={() => <text>Creates the next openai-account provider and opens browser login. Restart OpenCode before model use.</text>}
       onConfirm={(value) => {
         try {
           const provider = addOpenAIProvider(value)
+          api.ui.toast({ variant: "info", title: "OpenAI provider added", message: "Finish login, then restart OpenCode before model use.", duration: 4500 })
           startProviderLogin(api, provider.id, provider.name)
           requestRefresh(api)
         } catch (err) {
