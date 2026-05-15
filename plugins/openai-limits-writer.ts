@@ -33,6 +33,8 @@ const REFRESH_MS = 2 * 60 * 1000
 const HTTP_TIMEOUT_MS = 12_000
 const LEADER_HEARTBEAT_MS = 10_000
 const LEADER_STALE_MS = 30_000
+const CACHE_WRITE_RETRIES = 6
+const CACHE_WRITE_RETRY_MS = 25
 
 const tokenCache = new Map<string, Auth>()
 const cookieJarCache = new Map<string, CookieJar>()
@@ -358,9 +360,66 @@ async function fetchLimit(account: Account, authMap: Record<string, Auth>, onSte
 
 function writeCache(snapshot: unknown) {
   mkdirSync(dirname(CACHE_FILE), { recursive: true })
-  const tmp = `${CACHE_FILE}.${process.pid}.tmp`
-  writeFileSync(tmp, JSON.stringify(snapshot, null, 2), "utf8")
-  renameSync(tmp, CACHE_FILE)
+  const body = JSON.stringify(snapshot, null, 2)
+  const tmp = `${CACHE_FILE}.${process.pid}.${Date.now()}.tmp`
+  writeFileSync(tmp, body, "utf8")
+
+  let lastError: unknown
+  for (let attempt = 0; attempt < CACHE_WRITE_RETRIES; attempt++) {
+    try {
+      renameSync(tmp, CACHE_FILE)
+      return
+    } catch (err: any) {
+      lastError = err
+      if (process.platform !== "win32" || (err?.code !== "EPERM" && err?.code !== "EACCES")) break
+      sleepSync(CACHE_WRITE_RETRY_MS * (attempt + 1))
+    }
+  }
+
+  if (process.platform === "win32") {
+    try {
+      try {
+        unlinkSync(CACHE_FILE)
+      } catch (err: any) {
+        if (err?.code !== "ENOENT") throw err
+      }
+      renameSync(tmp, CACHE_FILE)
+      return
+    } catch (err) {
+      lastError = err
+    }
+
+    try {
+      writeFileSync(CACHE_FILE, body, "utf8")
+      try {
+        unlinkSync(tmp)
+      } catch {
+        // Best effort cleanup only.
+      }
+      return
+    } catch (err) {
+      lastError = err
+    }
+  }
+
+  try {
+    unlinkSync(tmp)
+  } catch {
+    // Best effort cleanup only.
+  }
+  throw lastError
+}
+
+function sleepSync(ms: number) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+}
+
+function writeProgressCache(snapshot: unknown) {
+  try {
+    writeCache(snapshot)
+  } catch {
+    // Progress updates are best effort; the final snapshot carries the real result.
+  }
 }
 
 function isProcessAlive(pid: number) {
@@ -497,13 +556,13 @@ async function updateLimits() {
   const configuredAccounts = discoverOpenAIAccounts(authMap)
   const now = Date.now()
   const pendingAccounts = refreshingAccounts(now, configuredAccounts)
-  writeCache({ updatedAt: now, refreshing: true, accounts: pendingAccounts })
+  writeProgressCache({ updatedAt: now, refreshing: true, accounts: pendingAccounts })
 
   const patchMessage = (accountId: string, message: string) => {
     for (const account of pendingAccounts) {
       if (account.id === accountId) account.message = message
     }
-    writeCache({ updatedAt: now, refreshing: true, accounts: pendingAccounts })
+    writeProgressCache({ updatedAt: now, refreshing: true, accounts: pendingAccounts })
   }
 
   const accounts = await Promise.all(configuredAccounts.map((account) => fetchLimit(account, authMap, patchMessage)))

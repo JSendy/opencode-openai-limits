@@ -621,10 +621,10 @@ const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; grid?: boolea
 
   return (
     <box flexDirection="column" gap={0}>
-      <box flexDirection="row" justifyContent="space-between">
-        <text fg={skin.accent}><b>OpenAI limits remaining </b></text>
+      <box flexDirection="row" gap={1}>
+        <text fg={skin.accent} wrap={false}><b>OpenAI limits remaining</b></text>
         <box onMouseUp={() => !data().loading && requestRefresh(props.api)}>
-          <text fg={skin.muted}>{data().loading ? `${SPINNER_FRAMES[spinnerFrame()]} ${data().accounts.map(a => shortName(a)).join(", ")} refreshing` : `${GLYPHS.refresh} ${updated(data().updatedAt)}`}</text>
+          <text fg={skin.muted} wrap={false}>{data().loading ? `${SPINNER_FRAMES[spinnerFrame()]} ${data().accounts.map(a => shortName(a)).join(", ")} refreshing` : `${GLYPHS.refresh} ${updated(data().updatedAt)}`}</text>
         </box>
       </box>
       {data().accounts.length === 0 ? <text fg={skin.muted}>No OpenAI providers found</text> : null}
