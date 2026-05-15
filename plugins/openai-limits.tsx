@@ -55,8 +55,63 @@ type DialogState =
 
 const REFRESH_MS = 60 * 1000
 const PENDING_STALE_MS = 90 * 1000
-const SPINNER_FRAMES = ["o", "O", "0", "O"]
 const SPINNER_MS = 100
+
+type Glyphs = {
+  spinnerFrames: string[]
+  refresh: string
+  reset: string
+  barFull: string
+  barEmpty: string
+  showBar: boolean
+}
+
+const FANCY_GLYPHS: Glyphs = {
+  spinnerFrames: ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+  refresh: "↻",
+  reset: "⟳",
+  barFull: "█",
+  barEmpty: "░",
+  showBar: true,
+}
+
+const WINDOWS_GLYPHS: Glyphs = {
+  spinnerFrames: ["◐", "◓", "◑", "◒"],
+  refresh: "↻",
+  reset: "⟳",
+  barFull: "■",
+  barEmpty: "·",
+  showBar: true,
+}
+
+const ASCII_GLYPHS: Glyphs = {
+  spinnerFrames: ["o", "O", "0", "O"],
+  refresh: "refresh",
+  reset: "r",
+  barFull: "#",
+  barEmpty: "-",
+  showBar: true,
+}
+
+const PLAIN_GLYPHS: Glyphs = {
+  spinnerFrames: ["-", "\\", "|", "/"],
+  refresh: "refresh",
+  reset: "r",
+  barFull: "",
+  barEmpty: "",
+  showBar: false,
+}
+
+function glyphs() {
+  const style = String(process.env.OPENCODE_LIMITS_STYLE || "").toLowerCase()
+  if (style === "ascii") return ASCII_GLYPHS
+  if (style === "plain") return PLAIN_GLYPHS
+  if (style === "unicode" || style === "fancy") return FANCY_GLYPHS
+  return process.platform === "win32" ? WINDOWS_GLYPHS : FANCY_GLYPHS
+}
+
+const GLYPHS = glyphs()
+const SPINNER_FRAMES = GLYPHS.spinnerFrames
 
 const initialAccounts: AccountLimit[] = [
   {
@@ -200,17 +255,17 @@ function resetLeft(value?: WindowInfo) {
 }
 
 function reset(value?: WindowInfo) {
-  if (!value?.resetAt) return "r ?"
+  if (!value?.resetAt) return `${GLYPHS.reset} ?`
   const ms = value.resetAt * 1000
   const date = new Date(ms)
   const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()]
   const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
   const at = `${day} ${time}`
-  return `r ${resetLeft(value)} ${at}`
+  return `${GLYPHS.reset} ${resetLeft(value)} ${at}`
 }
 
 function resetShort(value?: WindowInfo) {
-  return `r ${resetLeft(value)}`
+  return `${GLYPHS.reset} ${resetLeft(value)}`
 }
 
 function resetLong(value?: WindowInfo) {
@@ -248,9 +303,15 @@ function line(account: AccountLimit, compact = false) {
 }
 
 function bar(value: WindowInfo | undefined, width: number) {
+  if (!GLYPHS.showBar) return ""
   const remaining = value ? Math.max(0, Math.min(100, Math.round(100 - value.used))) : 0
   const filled = Math.round((remaining / 100) * width)
-  return "#".repeat(filled) + "-".repeat(width - filled)
+  return GLYPHS.barFull.repeat(filled) + GLYPHS.barEmpty.repeat(width - filled)
+}
+
+function barPart(value: WindowInfo | undefined, width: number) {
+  const text = bar(value, width)
+  return text ? ` ${text}` : ""
 }
 
 function pairs<T>(items: T[]) {
@@ -541,8 +602,8 @@ const BarRow = (props: { api: TuiPluginApi; account: AccountLimit; barWidth: num
   const w = props.barWidth
   return (
     <box flexDirection="column" gap={0} onMouseUp={() => openAccountDialog(props.api, account)}>
-      <text fg={clr} wrap={false}>{`${name}: ${pct(account.fiveHour)} ${bar(account.fiveHour, w)} ${resetShort(account.fiveHour)}`}</text>
-      <text fg={clr} wrap={false}>{`${pad}  wk ${pct(account.week)} ${bar(account.week, w)} ${resetShort(account.week)}`}</text>
+      <text fg={clr} wrap={false}>{`${name}: ${pct(account.fiveHour)}${barPart(account.fiveHour, w)} ${resetShort(account.fiveHour)}`}</text>
+      <text fg={clr} wrap={false}>{`${pad}  wk ${pct(account.week)}${barPart(account.week, w)} ${resetShort(account.week)}`}</text>
     </box>
   )
 }
@@ -563,7 +624,7 @@ const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; grid?: boolea
       <box flexDirection="row" justifyContent="space-between">
         <text fg={skin.accent}><b>OpenAI limits remaining </b></text>
         <box onMouseUp={() => !data().loading && requestRefresh(props.api)}>
-          <text fg={skin.muted}>{data().loading ? `${SPINNER_FRAMES[spinnerFrame()]} ${data().accounts.map(a => shortName(a)).join(", ")} refreshing` : `refresh ${updated(data().updatedAt)}`}</text>
+          <text fg={skin.muted}>{data().loading ? `${SPINNER_FRAMES[spinnerFrame()]} ${data().accounts.map(a => shortName(a)).join(", ")} refreshing` : `${GLYPHS.refresh} ${updated(data().updatedAt)}`}</text>
         </box>
       </box>
       {data().accounts.length === 0 ? <text fg={skin.muted}>No OpenAI providers found</text> : null}

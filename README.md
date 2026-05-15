@@ -105,6 +105,14 @@ Restart OpenCode after installing.
 
 The plugin creates a canonical OpenCode OAuth provider id like `openai-account-7` automatically and stores the OAuth credential under that provider id in your local OpenCode auth file.
 
+## Terminal Style
+
+The limits panel uses polished Unicode glyphs on macOS/Linux and PowerShell-safe glyphs on Windows. If your terminal font still renders bars or icons poorly, set `OPENCODE_LIMITS_STYLE` before starting OpenCode:
+
+- `unicode` or `fancy` - force the full macOS-style glyph set.
+- `ascii` - force `#`/`-` bars.
+- `plain` - hide bars and use plain reset text.
+
 ## Files
 
 - `plugins/openai-limits.tsx` - TUI panel, dialogs, add/login/relogin/remove actions.

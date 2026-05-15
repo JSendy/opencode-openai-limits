@@ -45,6 +45,10 @@ Add the TUI plugin to `~/.config/opencode/tui.jsonc`:
 - `/limits-add` adds the next canonical `openai-account-N` provider and starts ChatGPT Pro/Plus browser login.
 - Click any provider row to login, relogin, or remove that provider.
 
+## Terminal Style
+
+The TUI uses polished Unicode glyphs on macOS/Linux and PowerShell-safe glyphs on Windows. Set `OPENCODE_LIMITS_STYLE` before starting OpenCode to force `unicode`, `fancy`, `ascii`, or `plain` rendering.
+
 ## Credentials
 
 Do not copy `~/.local/share/opencode/auth.json`.
