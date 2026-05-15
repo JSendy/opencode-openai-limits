@@ -568,7 +568,7 @@ const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; grid?: boolea
       </box>
       {data().accounts.length === 0 ? <text fg={skin.muted}>No OpenAI providers found</text> : null}
       {props.grid
-        ? pairs(data().accounts).map((row) => (
+        ? pairs<AccountLimit>(data().accounts).map((row) => (
             <box flexDirection="row" gap={2}>
               {row.map((account) => accountBox(account))}
             </box>
