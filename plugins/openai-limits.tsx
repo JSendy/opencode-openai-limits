@@ -2,7 +2,7 @@
 import { spawn } from "node:child_process"
 import { chmodSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import { createSignal } from "solid-js"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule, TuiSlotPlugin } from "@opencode-ai/plugin/tui"
 import {
@@ -55,7 +55,7 @@ type DialogState =
 
 const REFRESH_MS = 60 * 1000
 const PENDING_STALE_MS = 90 * 1000
-const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+const SPINNER_FRAMES = ["o", "O", "0", "O"]
 const SPINNER_MS = 100
 
 const initialAccounts: AccountLimit[] = [
@@ -92,7 +92,6 @@ function stopSpinner() {
   }
 }
 
-let refreshing = false
 let cacheWatcher: ReturnType<typeof watch> | undefined
 let currentApi: TuiPluginApi | undefined
 let dialogApi: TuiPluginApi | undefined
@@ -120,7 +119,8 @@ function applyCache(cache: LimitsCache): RefreshResult {
   if (errorAccount) setLastError(`${errorAccount.name}: ${errorAccount.message}`)
   else if (!pending) setLastError(undefined)
   setSnapshot({ loading: pending, accounts, updatedAt })
-  if (pending) startSpinner(); else stopSpinner()
+  if (pending) startSpinner()
+  else stopSpinner()
   requestRender()
   rerenderDialog()
   return { pending, updatedAt }
@@ -147,7 +147,7 @@ function refreshLimits() {
 function startCacheWatcher() {
   if (cacheWatcher) return
   try {
-    const cacheFilename = CACHE_FILE.slice(CACHE_FILE.lastIndexOf("/") + 1)
+    const cacheFilename = basename(CACHE_FILE)
     let debounce: ReturnType<typeof setTimeout> | undefined
     cacheWatcher = watch(DATA_DIR, (_, filename) => {
       if (filename !== cacheFilename) return
@@ -155,7 +155,7 @@ function startCacheWatcher() {
       debounce = setTimeout(() => refreshLimits(), 20)
     })
   } catch {
-    // DATA_DIR doesn't exist yet — fallback timer will handle it
+    // DATA_DIR doesn't exist yet; fallback timer will handle it.
   }
 }
 
@@ -191,11 +191,7 @@ function minutesUntil(value?: WindowInfo) {
 function duration(mins: number) {
   if (mins <= 0) return "0h"
   if (mins < 60) return "<1h"
-  const h = Math.ceil(mins / 60)
-  if (h < 24) return `${h}h`
-  const days = Math.floor(h / 24)
-  const hours = h % 24
-  return hours > 0 ? `${days}d${hours}h` : `${days}d`
+  return `${Math.ceil(mins / 60)}h`
 }
 
 function resetLeft(value?: WindowInfo) {
@@ -204,17 +200,17 @@ function resetLeft(value?: WindowInfo) {
 }
 
 function reset(value?: WindowInfo) {
-  if (!value?.resetAt) return "⟳ ?"
+  if (!value?.resetAt) return "r ?"
   const ms = value.resetAt * 1000
   const date = new Date(ms)
   const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()]
   const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
   const at = `${day} ${time}`
-  return `⟳ ${resetLeft(value)} ${at}`
+  return `r ${resetLeft(value)} ${at}`
 }
 
 function resetShort(value?: WindowInfo) {
-  return `⟳ ${resetLeft(value)}`
+  return `r ${resetLeft(value)}`
 }
 
 function resetLong(value?: WindowInfo) {
@@ -254,7 +250,7 @@ function line(account: AccountLimit, compact = false) {
 function bar(value: WindowInfo | undefined, width: number) {
   const remaining = value ? Math.max(0, Math.min(100, Math.round(100 - value.used))) : 0
   const filled = Math.round((remaining / 100) * width)
-  return "█".repeat(filled) + "░".repeat(width - filled)
+  return "#".repeat(filled) + "-".repeat(width - filled)
 }
 
 function pairs<T>(items: T[]) {
@@ -545,8 +541,8 @@ const BarRow = (props: { api: TuiPluginApi; account: AccountLimit; barWidth: num
   const w = props.barWidth
   return (
     <box flexDirection="column" gap={0} onMouseUp={() => openAccountDialog(props.api, account)}>
-      <text fg={clr} wrap={false}>{`${name} 5h ${bar(account.fiveHour, w)} ${pct(account.fiveHour)} ${resetShort(account.fiveHour)}`}</text>
-      <text fg={clr} wrap={false}>{`${pad} wk ${bar(account.week, w)} ${pct(account.week)} ${resetShort(account.week)}`}</text>
+      <text fg={clr} wrap={false}>{`${name}: ${pct(account.fiveHour)} ${bar(account.fiveHour, w)} ${resetShort(account.fiveHour)}`}</text>
+      <text fg={clr} wrap={false}>{`${pad}  wk ${pct(account.week)} ${bar(account.week, w)} ${resetShort(account.week)}`}</text>
     </box>
   )
 }
@@ -565,9 +561,9 @@ const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; grid?: boolea
   return (
     <box flexDirection="column" gap={0}>
       <box flexDirection="row" justifyContent="space-between">
-        <text fg={skin.accent}><b>OpenAI limits</b></text>
+        <text fg={skin.accent}><b>OpenAI limits remaining </b></text>
         <box onMouseUp={() => !data().loading && requestRefresh(props.api)}>
-          <text fg={skin.muted}>{data().loading ? `${SPINNER_FRAMES[spinnerFrame()]} ${data().accounts.map(a => shortName(a)).join(", ")} refreshing` : `↻ ${updated(data().updatedAt)}`}</text>
+          <text fg={skin.muted}>{data().loading ? `${SPINNER_FRAMES[spinnerFrame()]} ${data().accounts.map(a => shortName(a)).join(", ")} refreshing` : `refresh ${updated(data().updatedAt)}`}</text>
         </box>
       </box>
       {data().accounts.length === 0 ? <text fg={skin.muted}>No OpenAI providers found</text> : null}
@@ -662,8 +658,8 @@ function renderAccountDialog(api: TuiPluginApi, account: AccountLimit) {
         {account.status !== "ok"
           ? <text fg={color(api, account)}>{account.message || account.status}</text>
           : <box flexDirection="column" gap={0}>
-              <text fg={color(api, account)} wrap={false}>{`5h window ${pct(account.fiveHour)} — ${resetLong(account.fiveHour)}`}</text>
-              <text fg={color(api, account)} wrap={false}>{`wk window ${pct(account.week)} — ${resetLong(account.week)}`}</text>
+              <text fg={color(api, account)} wrap={false}>{`primary ${pct(account.fiveHour)} remaining - ${resetLong(account.fiveHour)}`}</text>
+              <text fg={color(api, account)} wrap={false}>{`week ${pct(account.week)} remaining - ${resetLong(account.week)}`}</text>
             </box>
         }
 
