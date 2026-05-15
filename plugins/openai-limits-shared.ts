@@ -42,6 +42,7 @@ export const DATA_DIR = join(homedir(), ".local", "share", "opencode")
 export const CONFIG_FILE = join(homedir(), ".config", "opencode", "opencode.jsonc")
 export const AUTH_FILE = join(DATA_DIR, "auth.json")
 export const CACHE_FILE = join(DATA_DIR, "openai-limits.json")
+export const LEADER_FILE = join(DATA_DIR, "openai-limits.leader")
 export const REFRESH_REQUEST_FILE = join(DATA_DIR, "openai-limits.refresh")
 export const OPENAI_PROVIDER_NPM = "@ai-sdk/openai"
 export const OPENAI_LOGIN_METHOD = "ChatGPT Pro/Plus (browser)"

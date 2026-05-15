@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { spawn } from "node:child_process"
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { chmodSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { createSignal } from "solid-js"
@@ -53,9 +53,10 @@ type DialogState =
   | { type: "login"; providerID: string; providerName: string; launched: boolean }
   | { type: "remove"; accountID: string }
 
-const REFRESH_MS = 2 * 60 * 1000
-const REFRESH_WAIT_MS = 90 * 1000
+const REFRESH_MS = 60 * 1000
 const PENDING_STALE_MS = 90 * 1000
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+const SPINNER_MS = 100
 
 const initialAccounts: AccountLimit[] = [
   {
@@ -71,8 +72,28 @@ const [snapshot, setSnapshot] = createSignal<Snapshot>({
   accounts: initialAccounts,
 })
 
+const [lastError, setLastError] = createSignal<string | undefined>(undefined)
+
+const [spinnerFrame, setSpinnerFrame] = createSignal(0)
+let spinnerTimer: ReturnType<typeof setInterval> | undefined
+
+function startSpinner() {
+  if (spinnerTimer) return
+  spinnerTimer = setInterval(() => {
+    setSpinnerFrame((f) => (f + 1) % SPINNER_FRAMES.length)
+    requestRender()
+  }, SPINNER_MS)
+}
+
+function stopSpinner() {
+  if (spinnerTimer) {
+    clearInterval(spinnerTimer)
+    spinnerTimer = undefined
+  }
+}
+
 let refreshing = false
-let refreshPollTimer: ReturnType<typeof setTimeout> | undefined
+let cacheWatcher: ReturnType<typeof watch> | undefined
 let currentApi: TuiPluginApi | undefined
 let dialogApi: TuiPluginApi | undefined
 let activeDialog: DialogState | undefined
@@ -95,68 +116,57 @@ function applyCache(cache: LimitsCache): RefreshResult {
   const accounts = pending
     ? cache.accounts!
     : cache.accounts!.map((account) => (account.message === "refreshing" ? { ...account, message: "refresh timed out" } : account))
+  const errorAccount = !pending && accounts.find((a) => a.status === "error")
+  if (errorAccount) setLastError(`${errorAccount.name}: ${errorAccount.message}`)
+  else if (!pending) setLastError(undefined)
   setSnapshot({ loading: pending, accounts, updatedAt })
+  if (pending) startSpinner(); else stopSpinner()
   requestRender()
   rerenderDialog()
   return { pending, updatedAt }
 }
 
-function readCache() {
-  const cache = JSON.parse(readFileSync(CACHE_FILE, "utf8")) as LimitsCache
-  if (cache.error) throw new Error(cache.error)
-  if (!Array.isArray(cache.accounts)) throw new Error("limits cache missing accounts")
-  return cache
-}
-
-async function refreshLimits(): Promise<RefreshResult> {
-  if (refreshing) return { pending: true, updatedAt: snapshot().updatedAt ?? 0 }
-  refreshing = true
+function readCache(): LimitsCache | undefined {
   try {
-    setSnapshot((current) => ({
-      ...current,
-      loading: true,
-      accounts: current.accounts.length ? current.accounts : initialAccounts,
-    }))
-    const cache = readCache()
-    return applyCache(cache)
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    const accounts = snapshot().accounts.length ? snapshot().accounts : initialAccounts
-    setSnapshot({
-      loading: false,
-      accounts: accounts.map((account) => ({
-        ...account,
-        status: "error" as const,
-        message,
-      })),
-      updatedAt: snapshot().updatedAt,
-    })
-    requestRender()
-    rerenderDialog()
-    return { pending: true, updatedAt: snapshot().updatedAt ?? 0 }
-  } finally {
-    refreshing = false
+    const cache = JSON.parse(readFileSync(CACHE_FILE, "utf8")) as LimitsCache
+    if (!Array.isArray(cache.accounts)) return undefined
+    return cache
+  } catch {
+    return undefined
   }
 }
 
-function pollForUpdatedCache(since: number, deadline: number) {
-  clearTimeout(refreshPollTimer)
-  refreshPollTimer = setTimeout(() => {
-    void refreshLimits().then((result) => {
-      if ((result.pending || result.updatedAt <= since) && Date.now() < deadline) pollForUpdatedCache(since, deadline)
+function refreshLimits() {
+  const cache = readCache()
+  if (!cache) return
+  // Ignore a completed cache that is older than what we already have
+  if (!isPendingCache(cache) && (cache.updatedAt ?? 0) < (snapshot().updatedAt ?? 0)) return
+  applyCache(cache)
+}
+
+function startCacheWatcher() {
+  if (cacheWatcher) return
+  try {
+    const cacheFilename = CACHE_FILE.slice(CACHE_FILE.lastIndexOf("/") + 1)
+    let debounce: ReturnType<typeof setTimeout> | undefined
+    cacheWatcher = watch(DATA_DIR, (_, filename) => {
+      if (filename !== cacheFilename) return
+      clearTimeout(debounce)
+      debounce = setTimeout(() => refreshLimits(), 20)
     })
-  }, 1000)
+  } catch {
+    // DATA_DIR doesn't exist yet — fallback timer will handle it
+  }
 }
 
 function requestRefresh(api: TuiPluginApi) {
-  const since = snapshot().updatedAt ?? 0
   try {
     mkdirSync(dirname(REFRESH_REQUEST_FILE), { recursive: true })
     writeFileSync(REFRESH_REQUEST_FILE, JSON.stringify({ requestedAt: Date.now() }), "utf8")
     setSnapshot((current) => ({ ...current, loading: true }))
+    startSpinner()
     requestRender()
     rerenderDialog()
-    pollForUpdatedCache(since, Date.now() + REFRESH_WAIT_MS)
     api.ui.toast({ variant: "info", title: "OpenAI limits", message: "refresh requested", duration: 1500 })
   } catch (err) {
     api.ui.toast({
@@ -181,7 +191,11 @@ function minutesUntil(value?: WindowInfo) {
 function duration(mins: number) {
   if (mins <= 0) return "0h"
   if (mins < 60) return "<1h"
-  return `${Math.ceil(mins / 60)}h`
+  const h = Math.ceil(mins / 60)
+  if (h < 24) return `${h}h`
+  const days = Math.floor(h / 24)
+  const hours = h % 24
+  return hours > 0 ? `${days}d${hours}h` : `${days}d`
 }
 
 function resetLeft(value?: WindowInfo) {
@@ -190,23 +204,33 @@ function resetLeft(value?: WindowInfo) {
 }
 
 function reset(value?: WindowInfo) {
-  if (!value?.resetAt) return "r ?"
+  if (!value?.resetAt) return "⟳ ?"
   const ms = value.resetAt * 1000
   const date = new Date(ms)
   const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()]
   const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
   const at = `${day} ${time}`
-  return `r ${resetLeft(value)} ${at}`
+  return `⟳ ${resetLeft(value)} ${at}`
 }
 
 function resetShort(value?: WindowInfo) {
-  return `r ${resetLeft(value)}`
+  return `⟳ ${resetLeft(value)}`
+}
+
+function resetLong(value?: WindowInfo) {
+  if (!value?.resetAt) return "refreshes at unknown time"
+  const ms = value.resetAt * 1000
+  const date = new Date(ms)
+  const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()]
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getMonth()]
+  const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
+  return `refreshes in ${resetLeft(value)} on ${day}, ${month} ${date.getDate()}, ${time}`
 }
 
 function updated(value?: number) {
   if (!value) return "no data"
   const mins = Math.max(0, Math.round((Date.now() - value) / 60_000))
-  return mins < 1 ? "upd now" : `upd ${mins}m ago`
+  return mins < 1 ? "just now" : `${mins}m ago`
 }
 
 function clip(value: string, max: number) {
@@ -225,6 +249,12 @@ function line(account: AccountLimit, compact = false) {
   if (account.status !== "ok") return `${name}: ${account.message || account.status}`
   if (compact) return `${name}: ${pct(account.fiveHour)} ${resetShort(account.fiveHour)} wk ${pct(account.week)} ${resetShort(account.week)}`
   return `${name}: ${pct(account.fiveHour)} remaining ${reset(account.fiveHour)} week ${pct(account.week)} remaining ${reset(account.week)}`
+}
+
+function bar(value: WindowInfo | undefined, width: number) {
+  const remaining = value ? Math.max(0, Math.min(100, Math.round(100 - value.used))) : 0
+  const filled = Math.round((remaining / 100) * width)
+  return "█".repeat(filled) + "░".repeat(width - filled)
 }
 
 function pairs<T>(items: T[]) {
@@ -497,42 +527,63 @@ const ActionButton = (props: { api: TuiPluginApi; label: string; primary?: boole
   )
 }
 
+const BarRow = (props: { api: TuiPluginApi; account: AccountLimit; barWidth: number }) => {
+  const skin = tone(props.api)
+  const account = props.account
+  const clr = color(props.api, account)
+  const name = shortName(account)
+  const pad = " ".repeat(name.length)
+
+  if (account.status !== "ok") {
+    return (
+      <box onMouseUp={() => openAccountDialog(props.api, account)}>
+        <text fg={skin.muted}>{name}: {account.message || account.status}</text>
+      </box>
+    )
+  }
+
+  const w = props.barWidth
+  return (
+    <box flexDirection="column" gap={0} onMouseUp={() => openAccountDialog(props.api, account)}>
+      <text fg={clr} wrap={false}>{`${name} 5h ${bar(account.fiveHour, w)} ${pct(account.fiveHour)} ${resetShort(account.fiveHour)}`}</text>
+      <text fg={clr} wrap={false}>{`${pad} wk ${bar(account.week, w)} ${pct(account.week)} ${resetShort(account.week)}`}</text>
+    </box>
+  )
+}
+
 const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; grid?: boolean }) => {
   const skin = tone(props.api)
   const data = () => snapshot()
+  const barWidth = props.grid ? 16 : 12
+
   const accountBox = (account: AccountLimit) => (
-    <box width={props.grid ? 44 : undefined} onMouseUp={() => openAccountDialog(props.api, account)}>
-      <text fg={color(props.api, account)}>{line(account, props.compact)}</text>
+    <box width={props.grid ? 50 : undefined}>
+      <BarRow api={props.api} account={account} barWidth={barWidth} />
     </box>
   )
 
   return (
     <box flexDirection="column" gap={0}>
-      <box flexDirection="row" gap={1}>
-        <text fg={skin.accent}>
-          <b>OpenAI limits remaining </b>
-        </text>
-        <text fg={skin.muted}>{data().loading ? "refreshing" : updated(data().updatedAt)}</text>
+      <box flexDirection="row" justifyContent="space-between">
+        <text fg={skin.accent}><b>OpenAI limits</b></text>
+        <box onMouseUp={() => !data().loading && requestRefresh(props.api)}>
+          <text fg={skin.muted}>{data().loading ? `${SPINNER_FRAMES[spinnerFrame()]} ${data().accounts.map(a => shortName(a)).join(", ")} refreshing` : `↻ ${updated(data().updatedAt)}`}</text>
+        </box>
       </box>
       {data().accounts.length === 0 ? <text fg={skin.muted}>No OpenAI providers found</text> : null}
       {props.grid
         ? pairs(data().accounts).map((row) => (
-            <box flexDirection="row" gap={1}>
+            <box flexDirection="row" gap={2}>
               {row.map((account) => accountBox(account))}
             </box>
           ))
         : data().accounts.map((account) => accountBox(account))}
+      {lastError() ? <text fg={skin.error} wrap={false}>{lastError()}</text> : null}
     </box>
   )
 }
 
-const RefreshButton = (props: { api: TuiPluginApi; compact?: boolean }) => (
-  <ActionButton api={props.api} label={props.compact ? "refresh" : "refresh now"} onClick={() => requestRefresh(props.api)} />
-)
 
-const AddProviderButton = (props: { api: TuiPluginApi; compact?: boolean }) => (
-  <ActionButton api={props.api} label={props.compact ? "add provider" : "Add OpenAI provider"} onClick={() => openAddProviderDialog(props.api)} />
-)
 
 function slots(api: TuiPluginApi): TuiSlotPlugin {
   return {
@@ -551,12 +602,8 @@ function slots(api: TuiPluginApi): TuiSlotPlugin {
       sidebar_footer() {
         const skin = tone(api)
         return (
-          <box border borderColor={skin.border} backgroundColor={skin.panel} paddingLeft={1} paddingRight={1} flexDirection="column" gap={1}>
+          <box border borderColor={skin.border} backgroundColor={skin.panel} paddingLeft={1} paddingRight={1}>
             <LimitsList api={api} compact />
-            <box flexDirection="row" gap={1}>
-              <RefreshButton api={api} />
-              <AddProviderButton api={api} compact />
-            </box>
           </box>
         )
       },
@@ -564,12 +611,8 @@ function slots(api: TuiPluginApi): TuiSlotPlugin {
         const skin = tone(api)
         return (
           <box paddingTop={1} paddingBottom={1} flexDirection="column">
-            <box border borderColor={skin.border} backgroundColor={skin.panel} paddingLeft={1} paddingRight={1} flexDirection="column" gap={1}>
+            <box border borderColor={skin.border} backgroundColor={skin.panel} paddingLeft={1} paddingRight={1}>
               <LimitsList api={api} compact />
-              <box flexDirection="row" gap={1}>
-                <RefreshButton api={api} />
-                <AddProviderButton api={api} compact />
-              </box>
             </box>
           </box>
         )
@@ -597,8 +640,6 @@ function renderLimitsDialog(api: TuiPluginApi) {
       <box paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1} flexDirection="column">
         <LimitsList api={api} />
         <box flexDirection="row" gap={1}>
-          <RefreshButton api={api} />
-          <AddProviderButton api={api} />
           <ActionButton api={api} label="close" onClick={() => closeDialog(api)} />
         </box>
         <text fg={skin.muted}>Click provider to login again.</text>
@@ -614,16 +655,22 @@ function renderAccountDialog(api: TuiPluginApi, account: AccountLimit) {
   api.ui.dialog.replace(() => (
     <Dialog onClose={() => closeDialog(api)}>
       <box paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1} flexDirection="column">
-        <text fg={skin.accent}>
-          <b>{account.name}</b>
-        </text>
-        <text fg={skin.muted}>{account.id}</text>
-        <text fg={color(api, account)}>{line(account)}</text>
-        {account.plan ? <text fg={skin.muted}>plan {account.plan}</text> : null}
+        <box flexDirection="row" gap={1}>
+          <text fg={skin.accent}><b>{account.name}</b></text>
+          <text fg={skin.muted}>({account.id}{account.plan ? ` / ${account.plan}` : ""})</text>
+        </box>
+        {account.status !== "ok"
+          ? <text fg={color(api, account)}>{account.message || account.status}</text>
+          : <box flexDirection="column" gap={0}>
+              <text fg={color(api, account)} wrap={false}>{`5h window ${pct(account.fiveHour)} — ${resetLong(account.fiveHour)}`}</text>
+              <text fg={color(api, account)} wrap={false}>{`wk window ${pct(account.week)} — ${resetLong(account.week)}`}</text>
+            </box>
+        }
+
         <box flexDirection="row" gap={1}>
           <ActionButton api={api} label={account.status === "missing" ? "login" : "relogin"} primary onClick={() => startProviderLogin(api, account.id, account.name)} />
-          <ActionButton api={api} label="refresh now" onClick={() => requestRefresh(api)} />
           {canRemoveProvider(account) ? <ActionButton api={api} label="remove" onClick={() => openRemoveProviderDialog(api, account)} /> : null}
+          <ActionButton api={api} label="add provider" onClick={() => openAddProviderDialog(api)} />
           <ActionButton api={api} label="close" onClick={() => closeDialog(api)} />
         </box>
       </box>
@@ -676,7 +723,6 @@ function renderLoginDialog(api: TuiPluginApi, state: Extract<DialogState, { type
         <text fg={skin.warn}>Restart OpenCode after adding a provider before using it as a model. Refresh only updates limits.</text>
         <text fg={skin.muted}>{command}</text>
         <box flexDirection="row" gap={1}>
-          <ActionButton api={api} label="refresh now" primary onClick={() => requestRefresh(api)} />
           <ActionButton api={api} label="close" onClick={() => closeDialog(api)} />
         </box>
       </box>
@@ -743,11 +789,14 @@ function openAddProviderDialog(api: TuiPluginApi) {
 
 const tui: TuiPlugin = async (api) => {
   currentApi = api
+  startCacheWatcher()
   void refreshLimits()
-  const timer = setInterval(() => void refreshLimits(), REFRESH_MS)
+  const fallbackTimer = setInterval(() => void refreshLimits(), REFRESH_MS)
   api.lifecycle.onDispose(() => {
-    clearInterval(timer)
-    clearTimeout(refreshPollTimer)
+    clearInterval(fallbackTimer)
+    cacheWatcher?.close()
+    cacheWatcher = undefined
+    stopSpinner()
     if (currentApi === api) currentApi = undefined
     if (dialogApi === api) dialogApi = undefined
   })

@@ -1,10 +1,11 @@
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs"
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
 import { createServer } from "node:http"
 import os from "node:os"
 import { dirname } from "node:path"
 import type { Plugin } from "@opencode-ai/plugin"
 import {
   CACHE_FILE,
+  LEADER_FILE,
   REFRESH_REQUEST_FILE,
   accountIDFromClaims,
   accountIDFromTokens,
@@ -30,12 +31,22 @@ const OAUTH_PORT = 1455
 const OAUTH_POLLING_SAFETY_MARGIN_MS = 3000
 const REFRESH_MS = 2 * 60 * 1000
 const HTTP_TIMEOUT_MS = 12_000
+const LEADER_HEARTBEAT_MS = 10_000
+const LEADER_STALE_MS = 30_000
 
 const tokenCache = new Map<string, Auth>()
+const cookieJarCache = new Map<string, CookieJar>()
 let running = false
 let pending = false
+let isLeader = false
 let lastRefreshRequestMtime = 0
 const STARTED_KEY = Symbol.for("opencode.openai-limits-writer.started")
+
+type LeaderLease = {
+  pid: number
+  startedAt: number
+  heartbeatAt: number
+}
 
 type TokenResponse = {
   id_token?: string
@@ -281,7 +292,7 @@ function normalizeRateLimit(rateLimit: any) {
   }
 }
 
-async function fetchLimit(account: Account, authMap: Record<string, Auth>) {
+async function fetchLimit(account: Account, authMap: Record<string, Auth>, onStep: (id: string, message: string) => void = () => {}) {
   const auth = authMap[account.id]
   if (!auth) return { id: account.id, name: account.name, status: "missing", message: "not logged in" }
   if (auth.type !== "oauth") return { id: account.id, name: account.name, status: "unsupported", message: "not oauth" }
@@ -297,7 +308,8 @@ async function fetchLimit(account: Account, authMap: Record<string, Auth>) {
       "Content-Type": "application/json",
       "User-Agent": "opencode",
     }
-    const cookieJar: CookieJar = { cookies: new Map(), expires: 0 }
+    const cookieJar = cookieJarCache.get(account.id) ?? { cookies: new Map(), expires: 0 }
+    cookieJarCache.set(account.id, cookieJar)
     await ensureCloudflareCookie(cookieJar, headers)
 
     const request = () =>
@@ -309,12 +321,14 @@ async function fetchLimit(account: Account, authMap: Record<string, Auth>) {
         },
       })
 
+    onStep(account.id, "fetching usage")
     let response = await request()
     updateCloudflareCookies(cookieJar, response.headers)
     if (response.status === 403) {
       cookieJar.cookies.clear()
       cookieJar.expires = 0
       await ensureCloudflareCookie(cookieJar, headers)
+      onStep(account.id, "fetching usage (retry)")
       response = await request()
       updateCloudflareCookies(cookieJar, response.headers)
     }
@@ -344,9 +358,96 @@ async function fetchLimit(account: Account, authMap: Record<string, Auth>) {
 
 function writeCache(snapshot: unknown) {
   mkdirSync(dirname(CACHE_FILE), { recursive: true })
-  const tmp = `${CACHE_FILE}.tmp`
+  const tmp = `${CACHE_FILE}.${process.pid}.tmp`
   writeFileSync(tmp, JSON.stringify(snapshot, null, 2), "utf8")
   renameSync(tmp, CACHE_FILE)
+}
+
+function isProcessAlive(pid: number) {
+  if (!pid || pid < 1) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err: any) {
+    return err?.code === "EPERM"
+  }
+}
+
+function readLeaderLease() {
+  try {
+    return JSON.parse(readFileSync(LEADER_FILE, "utf8")) as LeaderLease
+  } catch {
+    return undefined
+  }
+}
+
+function writeLeaderLease(startedAt: number) {
+  mkdirSync(dirname(LEADER_FILE), { recursive: true })
+  writeFileSync(LEADER_FILE, JSON.stringify({ pid: process.pid, startedAt, heartbeatAt: Date.now() }, null, 2), "utf8")
+}
+
+function createLeaderLease(startedAt: number) {
+  mkdirSync(dirname(LEADER_FILE), { recursive: true })
+  const fd = openSync(LEADER_FILE, "wx")
+  try {
+    writeFileSync(fd, JSON.stringify({ pid: process.pid, startedAt, heartbeatAt: Date.now() }, null, 2), "utf8")
+  } finally {
+    closeSync(fd)
+  }
+}
+
+function canTakeLeadership(lease: LeaderLease | undefined) {
+  if (!lease) return true
+  if (lease.pid === process.pid) return true
+  if (!isProcessAlive(lease.pid)) return true
+  return Date.now() - Number(lease.heartbeatAt || 0) > LEADER_STALE_MS
+}
+
+function tryBecomeLeader() {
+  if (isLeader) return true
+  const current = readLeaderLease()
+  if (current && current.pid === process.pid) {
+    isLeader = true
+    writeLeaderLease(current.startedAt || Date.now())
+    return true
+  }
+  if (!canTakeLeadership(current)) return false
+
+  const startedAt = Date.now()
+  try {
+    if (current && current.pid !== process.pid) unlinkSync(LEADER_FILE)
+    createLeaderLease(startedAt)
+    const next = readLeaderLease()
+    isLeader = next?.pid === process.pid && next?.startedAt === startedAt
+    return isLeader
+  } catch {
+    return false
+  }
+}
+
+function refreshLeadership() {
+  if (isLeader) {
+    const current = readLeaderLease()
+    if (!current || current.pid !== process.pid) {
+      isLeader = false
+      return false
+    }
+    writeLeaderLease(current.startedAt)
+    return true
+  }
+
+  return tryBecomeLeader()
+}
+
+function releaseLeadership() {
+  if (!isLeader) return
+  isLeader = false
+  try {
+    const current = readLeaderLease()
+    if (current?.pid === process.pid) unlinkSync(LEADER_FILE)
+  } catch {
+    // Best effort cleanup only.
+  }
 }
 
 function readPreviousAccounts(accounts: Account[]) {
@@ -395,16 +496,22 @@ async function updateLimits() {
   const authMap = readAuthMap()
   const configuredAccounts = discoverOpenAIAccounts(authMap)
   const now = Date.now()
-  writeCache({
-    updatedAt: now,
-    refreshing: true,
-    accounts: refreshingAccounts(now, configuredAccounts),
-  })
-  const accounts = await Promise.all(configuredAccounts.map((account) => fetchLimit(account, authMap)))
+  const pendingAccounts = refreshingAccounts(now, configuredAccounts)
+  writeCache({ updatedAt: now, refreshing: true, accounts: pendingAccounts })
+
+  const patchMessage = (accountId: string, message: string) => {
+    for (const account of pendingAccounts) {
+      if (account.id === accountId) account.message = message
+    }
+    writeCache({ updatedAt: now, refreshing: true, accounts: pendingAccounts })
+  }
+
+  const accounts = await Promise.all(configuredAccounts.map((account) => fetchLimit(account, authMap, patchMessage)))
   writeCache({ updatedAt: Date.now(), accounts })
 }
 
 function runUpdater() {
+  if (!isLeader) return
   if (running) {
     pending = true
     return
@@ -422,6 +529,7 @@ function runUpdater() {
 }
 
 function pollRefreshRequest() {
+  if (!isLeader) return
   try {
     const mtime = statSync(REFRESH_REQUEST_FILE).mtimeMs
     if (mtime <= lastRefreshRequestMtime) return
@@ -436,9 +544,17 @@ function startWriter() {
   const state = globalThis as any
   if (state[STARTED_KEY]) return
   state[STARTED_KEY] = true
-  runUpdater()
-  setInterval(runUpdater, REFRESH_MS)
-  setInterval(pollRefreshRequest, 1000)
+  if (tryBecomeLeader()) runUpdater()
+  setInterval(() => {
+    refreshLeadership()
+    runUpdater()
+  }, REFRESH_MS)
+  setInterval(() => {
+    refreshLeadership()
+    pollRefreshRequest()
+  }, 1000)
+  setInterval(refreshLeadership, LEADER_HEARTBEAT_MS)
+  process.once("exit", releaseLeadership)
 }
 
 function removeAuthorization(headers: HeadersInit | undefined) {
