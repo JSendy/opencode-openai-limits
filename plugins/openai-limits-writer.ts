@@ -1,9 +1,10 @@
-import { closeSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs"
 import { createServer } from "node:http"
 import os from "node:os"
 import { dirname } from "node:path"
 import type { Plugin } from "@opencode-ai/plugin"
 import {
+  AUTH_FILE,
   CACHE_FILE,
   LEADER_FILE,
   REFRESH_REQUEST_FILE,
@@ -228,6 +229,32 @@ async function refreshToken(providerID: string, auth: Auth) {
   return next
 }
 
+function sameCredential(left: Auth | undefined, right: Auth) {
+  return Boolean(left && left.type === "oauth" && (left.refresh === right.refresh || left.access === right.access))
+}
+
+function persistRefreshedAuth(providerID: string, previous: Auth, next: Auth) {
+  if (previous.access === next.access && previous.refresh === next.refresh && previous.expires === next.expires && previous.accountId === next.accountId) return
+
+  try {
+    const authMap = JSON.parse(readFileSync(AUTH_FILE, "utf8")) as Record<string, Auth>
+    const current = authMap[providerID]
+    if (!sameCredential(current, previous)) return
+
+    authMap[providerID] = {
+      ...current,
+      access: next.access,
+      refresh: next.refresh,
+      expires: next.expires,
+      ...(next.accountId ? { accountId: next.accountId } : {}),
+    }
+    mkdirSync(dirname(AUTH_FILE), { recursive: true })
+    writeFileSync(AUTH_FILE, `${JSON.stringify(authMap, null, 2)}\n`, "utf8")
+  } catch {
+    // Best effort; stale credentials will still work for the current process cache.
+  }
+}
+
 function setCookieHeaders(headers: Headers) {
   const getter = (headers as any).getSetCookie
   if (typeof getter === "function") return getter.call(headers) as string[]
@@ -301,6 +328,7 @@ async function fetchLimit(account: Account, authMap: Record<string, Auth>, onSte
 
   try {
     const token = await refreshToken(account.id, auth)
+    persistRefreshedAuth(account.id, auth, token)
     const accountId = accountIDFromTokens(token)
     if (!token.access || !accountId) throw new Error("missing account id")
 
@@ -474,7 +502,7 @@ function tryBecomeLeader() {
 
   const startedAt = Date.now()
   try {
-    if (current && current.pid !== process.pid) unlinkSync(LEADER_FILE)
+    if ((current && current.pid !== process.pid) || (!current && existsSync(LEADER_FILE))) unlinkSync(LEADER_FILE)
     createLeaderLease(startedAt)
     const next = readLeaderLease()
     isLeader = next?.pid === process.pid && next?.startedAt === startedAt

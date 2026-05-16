@@ -44,6 +44,7 @@ Add the TUI plugin to `~/.config/opencode/tui.jsonc`:
 - `/limits-refresh` refreshes current usage.
 - `/limits-add` adds the next canonical `openai-account-N` provider and starts ChatGPT Pro/Plus browser login.
 - Click any provider row to login, relogin, or remove that provider.
+- In `/limits` or a provider menu, switch between `classic` (default) and `balanced` display modes.
 
 ## Terminal Style
 

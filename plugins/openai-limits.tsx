@@ -46,6 +46,8 @@ type Snapshot = {
   updatedAt?: number
 }
 
+type DisplayMode = "balanced" | "classic"
+
 type DialogState =
   | { type: "limits" }
   | { type: "account"; accountID: string }
@@ -56,6 +58,8 @@ type DialogState =
 const REFRESH_MS = 60 * 1000
 const PENDING_STALE_MS = 90 * 1000
 const SPINNER_MS = 100
+const VIEW_FILE = join(DATA_DIR, "openai-limits-view.json")
+const DISPLAY_MODES: DisplayMode[] = ["classic", "balanced"]
 
 type Glyphs = {
   spinnerFrames: string[]
@@ -79,8 +83,8 @@ const WINDOWS_GLYPHS: Glyphs = {
   spinnerFrames: ["◐", "◓", "◑", "◒"],
   refresh: "↻",
   reset: "⟳",
-  barFull: "■",
-  barEmpty: "·",
+  barFull: "█",
+  barEmpty: "░",
   showBar: true,
 }
 
@@ -128,6 +132,7 @@ const [snapshot, setSnapshot] = createSignal<Snapshot>({
 })
 
 const [lastError, setLastError] = createSignal<string | undefined>(undefined)
+const [displayMode, setDisplayModeSignal] = createSignal<DisplayMode>(readDisplayMode())
 
 const [spinnerFrame, setSpinnerFrame] = createSignal(0)
 let spinnerTimer: ReturnType<typeof setInterval> | undefined
@@ -151,6 +156,7 @@ let cacheWatcher: ReturnType<typeof watch> | undefined
 let currentApi: TuiPluginApi | undefined
 let dialogApi: TuiPluginApi | undefined
 let activeDialog: DialogState | undefined
+let viewWriteTimer: ReturnType<typeof setTimeout> | undefined
 
 function requestRender() {
   currentApi?.renderer.requestRender()
@@ -197,6 +203,38 @@ function refreshLimits() {
   // Ignore a completed cache that is older than what we already have
   if (!isPendingCache(cache) && (cache.updatedAt ?? 0) < (snapshot().updatedAt ?? 0)) return
   applyCache(cache)
+}
+
+function isDisplayMode(value: string): value is DisplayMode {
+  return DISPLAY_MODES.includes(value as DisplayMode)
+}
+
+function readDisplayMode(): DisplayMode {
+  try {
+    const value = JSON.parse(readFileSync(VIEW_FILE, "utf8"))?.mode
+    return typeof value === "string" && isDisplayMode(value) ? value : "classic"
+  } catch {
+    return "classic"
+  }
+}
+
+function selectDisplayMode(mode: DisplayMode) {
+  if (displayMode() === mode) return
+  setDisplayModeSignal(mode)
+  if (viewWriteTimer) clearTimeout(viewWriteTimer)
+  viewWriteTimer = setTimeout(() => writeDisplayMode(mode), 50)
+  requestRender()
+  setTimeout(() => requestRender(), 0)
+}
+
+function writeDisplayMode(mode: DisplayMode) {
+  viewWriteTimer = undefined
+  try {
+    mkdirSync(dirname(VIEW_FILE), { recursive: true })
+    writeFileSync(VIEW_FILE, JSON.stringify({ mode }, null, 2), "utf8")
+  } catch {
+    // Non-fatal; the current session still switches immediately.
+  }
 }
 
 function startCacheWatcher() {
@@ -268,6 +306,10 @@ function resetShort(value?: WindowInfo) {
   return `${GLYPHS.reset} ${resetLeft(value)}`
 }
 
+function resetBare(value?: WindowInfo) {
+  return resetLeft(value)
+}
+
 function resetLong(value?: WindowInfo) {
   if (!value?.resetAt) return "refreshes at unknown time"
   const ms = value.resetAt * 1000
@@ -312,6 +354,23 @@ function bar(value: WindowInfo | undefined, width: number) {
 function barPart(value: WindowInfo | undefined, width: number) {
   const text = bar(value, width)
   return text ? ` ${text}` : ""
+}
+
+function balancedLines(account: AccountLimit, name: string) {
+  return [`${name}: ${pct(account.fiveHour)} ${resetBare(account.fiveHour)} wk ${pct(account.week)} ${resetBare(account.week)}`]
+}
+
+function classicLines(account: AccountLimit, name: string, pad: string, width: number) {
+  return [
+    `${name} 5h${barPart(account.fiveHour, width)} ${pct(account.fiveHour)} ${resetShort(account.fiveHour)}`,
+    `${pad} wk${barPart(account.week, width)} ${pct(account.week)} ${resetShort(account.week)}`,
+  ]
+}
+
+function displayLines(account: AccountLimit, name: string, pad: string, width: number) {
+  const mode = displayMode()
+  if (mode === "classic") return classicLines(account, name, pad, width)
+  return balancedLines(account, name)
 }
 
 function pairs<T>(items: T[]) {
@@ -584,6 +643,26 @@ const ActionButton = (props: { api: TuiPluginApi; label: string; primary?: boole
   )
 }
 
+const ViewButton = (props: { api: TuiPluginApi; mode: DisplayMode }) => {
+  const skin = tone(props.api)
+  const active = () => displayMode() === props.mode
+  return (
+    <box backgroundColor={active() ? skin.accent : skin.border} paddingLeft={1} paddingRight={1} onMouseUp={() => selectDisplayMode(props.mode)}>
+      <text fg={skin.text}>{active() ? `[${props.mode}]` : props.mode}</text>
+    </box>
+  )
+}
+
+const ViewModePicker = (props: { api: TuiPluginApi }) => {
+  const skin = tone(props.api)
+  return (
+    <box flexDirection="row" gap={1}>
+      <text fg={skin.muted}>view</text>
+      {DISPLAY_MODES.map((mode) => <ViewButton api={props.api} mode={mode} />)}
+    </box>
+  )
+}
+
 const BarRow = (props: { api: TuiPluginApi; account: AccountLimit; barWidth: number }) => {
   const skin = tone(props.api)
   const account = props.account
@@ -602,13 +681,27 @@ const BarRow = (props: { api: TuiPluginApi; account: AccountLimit; barWidth: num
   const w = props.barWidth
   return (
     <box flexDirection="column" gap={0} onMouseUp={() => openAccountDialog(props.api, account)}>
-      <text fg={clr} wrap={false}>{`${name}: ${pct(account.fiveHour)}${barPart(account.fiveHour, w)} ${resetShort(account.fiveHour)}`}</text>
-      <text fg={clr} wrap={false}>{`${pad}  wk ${pct(account.week)}${barPart(account.week, w)} ${resetShort(account.week)}`}</text>
+      {displayLines(account, name, pad, w).map((text) => <text fg={clr} wrap={false}>{text}</text>)}
     </box>
   )
 }
 
-const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; grid?: boolean }) => {
+const ViewPreview = (props: { api: TuiPluginApi; account: AccountLimit }) => {
+  const skin = tone(props.api)
+  const account = props.account
+  if (account.status !== "ok") return null
+  const name = shortName(account)
+  const pad = " ".repeat(name.length)
+  const width = 12
+  return (
+    <box flexDirection="column" gap={0}>
+      <text fg={skin.muted}>preview</text>
+      {displayLines(account, name, pad, width).map((text) => <text fg={color(props.api, account)} wrap={false}>{text}</text>)}
+    </box>
+  )
+}
+
+const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; controls?: boolean; grid?: boolean }) => {
   const skin = tone(props.api)
   const data = () => snapshot()
   const barWidth = props.grid ? 16 : 12
@@ -627,6 +720,9 @@ const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; grid?: boolea
           <text fg={skin.muted} wrap={false}>{data().loading ? `${SPINNER_FRAMES[spinnerFrame()]} ${data().accounts.map(a => shortName(a)).join(", ")} refreshing` : `${GLYPHS.refresh} ${updated(data().updatedAt)}`}</text>
         </box>
       </box>
+      {props.controls
+        ? <ViewModePicker api={props.api} />
+        : null}
       {data().accounts.length === 0 ? <text fg={skin.muted}>No OpenAI providers found</text> : null}
       {props.grid
         ? pairs<AccountLimit>(data().accounts).map((row) => (
@@ -695,7 +791,7 @@ function renderLimitsDialog(api: TuiPluginApi) {
   api.ui.dialog.replace(() => (
     <Dialog onClose={() => closeDialog(api)}>
       <box paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1} flexDirection="column">
-        <LimitsList api={api} />
+        <LimitsList api={api} controls />
         <box flexDirection="row" gap={1}>
           <ActionButton api={api} label="close" onClick={() => closeDialog(api)} />
         </box>
@@ -723,6 +819,9 @@ function renderAccountDialog(api: TuiPluginApi, account: AccountLimit) {
               <text fg={color(api, account)} wrap={false}>{`week ${pct(account.week)} remaining - ${resetLong(account.week)}`}</text>
             </box>
         }
+
+        <ViewModePicker api={api} />
+        <ViewPreview api={api} account={account} />
 
         <box flexDirection="row" gap={1}>
           <ActionButton api={api} label={account.status === "missing" ? "login" : "relogin"} primary onClick={() => startProviderLogin(api, account.id, account.name)} />
@@ -854,6 +953,10 @@ const tui: TuiPlugin = async (api) => {
     cacheWatcher?.close()
     cacheWatcher = undefined
     stopSpinner()
+    if (viewWriteTimer) {
+      clearTimeout(viewWriteTimer)
+      viewWriteTimer = undefined
+    }
     if (currentApi === api) currentApi = undefined
     if (dialogApi === api) dialogApi = undefined
   })

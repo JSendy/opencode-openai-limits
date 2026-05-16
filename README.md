@@ -103,6 +103,11 @@ Restart OpenCode after installing.
 4. Run `/limits-refresh`.
 5. Click any provider row later to relogin, refresh, or remove it.
 
+The `/limits` dialog and each provider menu include two persisted display modes:
+
+- `classic` - default bar-first layout with a solid usage line.
+- `balanced` - compact pre-refresh-panel layout without bars.
+
 The plugin creates a canonical OpenCode OAuth provider id like `openai-account-7` automatically and stores the OAuth credential under that provider id in your local OpenCode auth file.
 
 ## Terminal Style
@@ -130,12 +135,14 @@ Do not commit or share these local runtime files:
 - `%USERPROFILE%\.local\share\opencode\auth.json`
 - `%USERPROFILE%\.local\share\opencode\openai-limits.json`
 - `%USERPROFILE%\.local\share\opencode\openai-limits.refresh`
+- `%USERPROFILE%\.local\share\opencode\openai-limits-view.json`
 - `%USERPROFILE%\.local\share\opencode\openai-limits-login*.cmd`
 - `%USERPROFILE%\.local\share\opencode\openai-limits-login*.sh`
 - `%USERPROFILE%\.local\share\opencode\openai-limits-*.cjs`
 - `~/.local/share/opencode/auth.json`
 - `~/.local/share/opencode/openai-limits.json`
 - `~/.local/share/opencode/openai-limits.refresh`
+- `~/.local/share/opencode/openai-limits-view.json`
 - `~/.local/share/opencode/openai-limits-login*.sh`
 - `~/.local/share/opencode/openai-limits-*.cjs`
 
