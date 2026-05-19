@@ -333,7 +333,7 @@ function clip(value: string, max: number) {
 function shortName(account: AccountLimit) {
   const match = account.id.match(/^openai-account-(\d+)$/)
   if (match) return `A${match[1]}`
-  if (account.id === "openai") return "OpenAI"
+  if (account.id === "openai") return "AI"
   return clip(account.name, 14)
 }
 
@@ -701,13 +701,25 @@ const ViewPreview = (props: { api: TuiPluginApi; account: AccountLimit }) => {
   )
 }
 
+const ClassicAccountDivider = (props: { api: TuiPluginApi }) => {
+  const skin = tone(props.api)
+  return (
+    <box flexDirection="column" gap={0} width={1} flexGrow={0} flexShrink={0}>
+      <text fg={skin.border} wrap={false}>│</text>
+      <text fg={skin.border} wrap={false}>│</text>
+    </box>
+  )
+}
+
+const ClassicAccountSpacer = () => <box height={1} flexGrow={0} flexShrink={0} />
+
 const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; controls?: boolean; grid?: boolean }) => {
   const skin = tone(props.api)
   const data = () => snapshot()
   const barWidth = props.grid ? 16 : 12
 
   const accountBox = (account: AccountLimit) => (
-    <box width={props.grid ? 50 : undefined}>
+    <box width={props.grid && displayMode() !== "classic" ? 50 : "auto"} flexGrow={0} flexShrink={0}>
       <BarRow api={props.api} account={account} barWidth={barWidth} />
     </box>
   )
@@ -726,11 +738,21 @@ const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; controls?: bo
       {data().accounts.length === 0 ? <text fg={skin.muted}>No OpenAI providers found</text> : null}
       {props.grid
         ? pairs<AccountLimit>(data().accounts).map((row) => (
-            <box flexDirection="row" gap={2}>
-              {row.map((account) => accountBox(account))}
+            <box flexDirection="row" gap={displayMode() === "classic" ? 0 : 2}>
+              {row.map((account, index) => (
+                <box flexDirection="row" gap={displayMode() === "classic" ? 1 : 0}>
+                  {index > 0 && displayMode() === "classic" ? <ClassicAccountDivider api={props.api} /> : null}
+                  {accountBox(account)}
+                </box>
+              ))}
             </box>
           ))
-        : data().accounts.map((account) => accountBox(account))}
+        : data().accounts.map((account, index) => (
+            <box flexDirection="column" gap={0}>
+              {props.compact && displayMode() === "classic" && index > 0 ? <ClassicAccountSpacer /> : null}
+              {accountBox(account)}
+            </box>
+          ))}
       {lastError() ? <text fg={skin.error} wrap={false}>{lastError()}</text> : null}
     </box>
   )
@@ -747,7 +769,7 @@ function slots(api: TuiPluginApi): TuiSlotPlugin {
         return (
           <box width="100%" maxWidth={118} paddingTop={1} flexShrink={0}>
             <box border borderColor={skin.border} backgroundColor={skin.panel} paddingTop={1} paddingBottom={1} paddingLeft={2} paddingRight={2}>
-              <LimitsList api={api} compact grid />
+              <LimitsList api={api} compact />
             </box>
           </box>
         )
