@@ -284,7 +284,11 @@ function minutesUntil(value?: WindowInfo) {
 function duration(mins: number) {
   if (mins <= 0) return "0h"
   if (mins < 60) return "<1h"
-  return `${Math.ceil(mins / 60)}h`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.floor(hours / 24)
+  const remainingHours = hours % 24
+  return remainingHours > 0 ? `${days}d${remainingHours}h` : `${days}d`
 }
 
 function resetLeft(value?: WindowInfo) {
@@ -324,6 +328,10 @@ function updated(value?: number) {
   if (!value) return "no data"
   const mins = Math.max(0, Math.round((Date.now() - value) / 60_000))
   return mins < 1 ? "just now" : `${mins}m ago`
+}
+
+function headerStatus(data: Snapshot) {
+  return data.loading ? `${SPINNER_FRAMES[spinnerFrame()]} refreshing` : `${GLYPHS.refresh} ${updated(data.updatedAt)}`
 }
 
 function clip(value: string, max: number) {
@@ -726,11 +734,8 @@ const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; controls?: bo
 
   return (
     <box flexDirection="column" gap={0}>
-      <box flexDirection="row" gap={1}>
-        <text fg={skin.accent} wrap={false}><b>OpenAI limits remaining</b></text>
-        <box onMouseUp={() => !data().loading && requestRefresh(props.api)}>
-          <text fg={skin.muted} wrap={false}>{data().loading ? `${SPINNER_FRAMES[spinnerFrame()]} ${data().accounts.map(a => shortName(a)).join(", ")} refreshing` : `${GLYPHS.refresh} ${updated(data().updatedAt)}`}</text>
-        </box>
+      <box onMouseUp={() => !data().loading && requestRefresh(props.api)}>
+        <text fg={skin.accent} wrap={false}><b>{`OpenAI limits remaining ${headerStatus(data())}`}</b></text>
       </box>
       {props.controls
         ? <ViewModePicker api={props.api} />
