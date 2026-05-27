@@ -349,7 +349,7 @@ function line(account: AccountLimit, compact = false) {
   const name = compact ? shortName(account) : account.name
   if (account.status !== "ok") return `${name}: ${account.message || account.status}`
   if (compact) return `${name}: ${pct(account.fiveHour)} ${resetShort(account.fiveHour)} wk ${pct(account.week)} ${resetShort(account.week)}`
-  return `${name}: ${pct(account.fiveHour)} remaining ${reset(account.fiveHour)} week ${pct(account.week)} remaining ${reset(account.week)}`
+  return `${name}: ${pct(account.fiveHour)} r ${reset(account.fiveHour)} week ${pct(account.week)} r ${reset(account.week)}`
 }
 
 function bar(value: WindowInfo | undefined, width: number) {
@@ -735,7 +735,7 @@ const LimitsList = (props: { api: TuiPluginApi; compact?: boolean; controls?: bo
   return (
     <box flexDirection="column" gap={0}>
       <box onMouseUp={() => !data().loading && requestRefresh(props.api)}>
-        <text fg={skin.accent} wrap={false}><b>{`OpenAI limits remaining ${headerStatus(data())}`}</b></text>
+        <text fg={skin.accent} wrap={false}><b>{`OpenAI limits r ${headerStatus(data())}`}</b></text>
       </box>
       {props.controls
         ? <ViewModePicker api={props.api} />
@@ -842,8 +842,8 @@ function renderAccountDialog(api: TuiPluginApi, account: AccountLimit) {
         {account.status !== "ok"
           ? <text fg={color(api, account)}>{account.message || account.status}</text>
           : <box flexDirection="column" gap={0}>
-              <text fg={color(api, account)} wrap={false}>{`primary ${pct(account.fiveHour)} remaining - ${resetLong(account.fiveHour)}`}</text>
-              <text fg={color(api, account)} wrap={false}>{`week ${pct(account.week)} remaining - ${resetLong(account.week)}`}</text>
+              <text fg={color(api, account)} wrap={false}>{`primary ${pct(account.fiveHour)} r - ${resetLong(account.fiveHour)}`}</text>
+              <text fg={color(api, account)} wrap={false}>{`week ${pct(account.week)} r - ${resetLong(account.week)}`}</text>
             </box>
         }
 
