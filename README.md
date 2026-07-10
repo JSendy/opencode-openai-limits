@@ -38,6 +38,7 @@ Track ChatGPT Pro/Plus Codex usage, add provider logins, relogin accounts, and r
 | Limits | Shows remaining ChatGPT Pro/Plus Codex usage inside OpenCode. |
 | Providers | Discovers OpenAI providers from OpenCode config and local auth. |
 | Multi-account | Adds new OpenAI providers from the TUI with `/limits-add`. |
+| Model picker | Exposes the OpenAI model catalog for each account provider, including `fast` and `pro` aliases. |
 | Login | Opens browser OAuth login for each provider. |
 | Management | Supports relogin, refresh, and remove actions from the provider dialog. |
 | Safety | Keeps credentials local in OpenCode's own auth store. |
@@ -48,6 +49,7 @@ Track ChatGPT Pro/Plus Codex usage, add provider logins, relogin accounts, and r
 - `/limits` - open the full limits dialog.
 - `/limits-refresh` - refresh current usage.
 - `/limits-add` - add a new OpenAI provider and start browser login.
+- `/limits-sync-models` - write the current OpenAI model catalog to existing account providers.
 - Click a provider row - login, relogin, refresh, or remove that provider.
 
 ## Install

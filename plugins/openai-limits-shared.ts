@@ -49,7 +49,73 @@ export const OPENAI_LOGIN_METHOD = "ChatGPT Pro/Plus (browser)"
 const WRITER_PLUGIN_FILE = "./plugins/openai-limits-writer.ts"
 const WRITER_PLUGIN_PATH = join(dirname(CONFIG_FILE), "plugins", "openai-limits-writer.ts")
 
-const DEFAULT_MODEL_ID = "gpt-5.5"
+type ModelConfig = {
+  id?: string
+  name: string
+  release_date?: string
+  attachment?: boolean
+  reasoning?: boolean
+  temperature?: boolean
+  tool_call?: boolean
+  limit: {
+    context: number
+    input: number
+    output: number
+  }
+  modalities?: {
+    input: Array<"text" | "audio" | "image" | "video" | "pdf">
+    output: Array<"text" | "audio" | "image" | "video" | "pdf">
+  }
+  options?: Record<string, unknown>
+  variants?: Record<string, Record<string, unknown>>
+}
+
+type OpenAIModelEntry = {
+  id: string
+  name: string
+  apiID?: string
+  context: number
+  input: number
+  output: number
+  releaseDate: string
+  pdf?: boolean
+  options?: Record<string, unknown>
+}
+
+const REASONING_VARIANTS = Object.fromEntries(
+  ["none", "low", "medium", "high", "xhigh"].map((reasoningEffort) => [
+    reasoningEffort,
+    {
+      reasoningEffort,
+      reasoningSummary: "auto",
+      include: ["reasoning.encrypted_content"],
+    },
+  ]),
+) as Record<string, Record<string, unknown>>
+
+const OPENAI_MODEL_CATALOG: OpenAIModelEntry[] = [
+  { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", context: 128000, input: 100000, output: 32000, releaseDate: "2026-02-05" },
+  { id: "gpt-5.4", name: "GPT-5.4", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-03-05" },
+  { id: "gpt-5.4-fast", name: "GPT-5.4 Fast", apiID: "gpt-5.4", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-03-05", options: { serviceTier: "priority" } },
+  { id: "gpt-5.4-mini", name: "GPT-5.4 mini", context: 400000, input: 272000, output: 128000, releaseDate: "2026-03-17", pdf: false },
+  { id: "gpt-5.4-mini-fast", name: "GPT-5.4 mini Fast", apiID: "gpt-5.4-mini", context: 400000, input: 272000, output: 128000, releaseDate: "2026-03-17", pdf: false, options: { serviceTier: "priority" } },
+  { id: "gpt-5.5", name: "GPT-5.5", context: 400000, input: 272000, output: 128000, releaseDate: "2026-04-23" },
+  { id: "gpt-5.5-fast", name: "GPT-5.5 Fast", apiID: "gpt-5.5", context: 400000, input: 272000, output: 128000, releaseDate: "2026-04-23", options: { serviceTier: "priority" } },
+  { id: "gpt-5.6", name: "GPT-5.6", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09" },
+  { id: "gpt-5.6-fast", name: "GPT-5.6 Fast", apiID: "gpt-5.6", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09", options: { serviceTier: "priority" } },
+  { id: "gpt-5.6-luna", name: "GPT-5.6 Luna", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09" },
+  { id: "gpt-5.6-luna-fast", name: "GPT-5.6 Luna Fast", apiID: "gpt-5.6-luna", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09", options: { serviceTier: "priority" } },
+  { id: "gpt-5.6-luna-pro", name: "GPT-5.6 Luna Pro", apiID: "gpt-5.6-luna", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09", options: { reasoning: { mode: "pro" } } },
+  { id: "gpt-5.6-pro", name: "GPT-5.6 Pro", apiID: "gpt-5.6", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09", options: { reasoning: { mode: "pro" } } },
+  { id: "gpt-5.6-sol", name: "GPT-5.6 Sol", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09" },
+  { id: "gpt-5.6-sol-fast", name: "GPT-5.6 Sol Fast", apiID: "gpt-5.6-sol", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09", options: { serviceTier: "priority" } },
+  { id: "gpt-5.6-sol-pro", name: "GPT-5.6 Sol Pro", apiID: "gpt-5.6-sol", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09", options: { reasoning: { mode: "pro" } } },
+  { id: "gpt-5.6-terra", name: "GPT-5.6 Terra", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09" },
+  { id: "gpt-5.6-terra-fast", name: "GPT-5.6 Terra Fast", apiID: "gpt-5.6-terra", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09", options: { serviceTier: "priority" } },
+  { id: "gpt-5.6-terra-pro", name: "GPT-5.6 Terra Pro", apiID: "gpt-5.6-terra", context: 1050000, input: 922000, output: 128000, releaseDate: "2026-07-09", options: { reasoning: { mode: "pro" } } },
+]
+
+const OPENAI_MODEL_IDS = new Set(OPENAI_MODEL_CATALOG.map((model) => model.id))
 
 function jsoncToJson(input: string) {
   let output = ""
@@ -231,34 +297,73 @@ export function discoverOpenAIAccounts(authMap = readAuthMap()) {
   return Array.from(byId.values())
 }
 
-function defaultModels() {
+function modelConfig(entry: OpenAIModelEntry): ModelConfig {
   return {
-    [DEFAULT_MODEL_ID]: {
-      name: "GPT-5.5",
-      reasoning: true,
-      tool_call: true,
-      limit: {
-        context: 400000,
-        input: 272000,
-        output: 128000,
-      },
-      variants: {
-        xhigh: {
-          reasoningEffort: "xhigh",
-          textVerbosity: "low",
-          reasoningSummary: "auto",
-        },
-      },
+    ...(entry.apiID && entry.apiID !== entry.id ? { id: entry.apiID } : {}),
+    name: entry.name,
+    release_date: entry.releaseDate,
+    attachment: true,
+    reasoning: true,
+    temperature: false,
+    tool_call: true,
+    limit: {
+      context: entry.context,
+      input: entry.input,
+      output: entry.output,
     },
+    modalities: {
+      input: entry.pdf === false ? ["text", "image"] : ["text", "image", "pdf"],
+      output: ["text"],
+    },
+    ...(entry.options ? { options: clone(entry.options) } : {}),
+    variants: clone(REASONING_VARIANTS),
   }
+}
+
+function defaultModels() {
+  return Object.fromEntries(OPENAI_MODEL_CATALOG.map((entry) => [entry.id, modelConfig(entry)]))
 }
 
 function templateModels(config: OpenCodeConfig) {
   const providers = config.provider || {}
-  for (const [id, provider] of Object.entries(providers)) {
-    if (isOpenAIProviderConfig(id, provider) && provider.models) return clone(provider.models)
-  }
+  const builtInOpenAI = providers.openai
+  if (isOpenAIProviderConfig("openai", builtInOpenAI) && builtInOpenAI?.models && Object.keys(builtInOpenAI.models).length > 1) return clone(builtInOpenAI.models)
   return defaultModels()
+}
+
+function needsModelCatalog(provider: ProviderConfig) {
+  const modelIDs = Object.keys(provider.models || {})
+  return modelIDs.length === 0 || (modelIDs.length === 1 && OPENAI_MODEL_IDS.has(modelIDs[0]))
+}
+
+export function applyOpenAIProviderModelCatalog(config: OpenCodeConfig, providerID?: string, force = false) {
+  const providers = config.provider || {}
+  const models = templateModels(config)
+  const updated: string[] = []
+
+  for (const [id, provider] of Object.entries(providers)) {
+    if (id === "openai") continue
+    if (providerID && id !== providerID) continue
+    if (!isOpenAIProviderConfig(id, provider)) continue
+    if (!force && !needsModelCatalog(provider)) continue
+    provider.models = clone(models)
+    updated.push(id)
+  }
+
+  return { updated, modelCount: Object.keys(models).length }
+}
+
+export function syncOpenAIProviderModels(providerID?: string) {
+  const id = providerID?.trim()
+  if (id && !isSafeProviderID(id)) throw new Error("provider id must use letters, numbers, dot, dash, or underscore")
+
+  const config = readConfigForWrite()
+  const provider = id ? config.provider?.[id] : undefined
+  if (id && (!provider || !isOpenAIProviderConfig(id, provider))) throw new Error(`provider '${id}' is not an OpenAI account provider`)
+
+  const result = applyOpenAIProviderModelCatalog(config, id, true)
+  writeConfig(config)
+  return result
 }
 
 function writerAuthPluginSpec(providerID: string) {

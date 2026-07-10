@@ -43,7 +43,9 @@ Add the TUI plugin to `~/.config/opencode/tui.jsonc`:
 - `/limits` opens the full limits dialog.
 - `/limits-refresh` refreshes current usage.
 - `/limits-add` adds the next canonical `openai-account-N` provider and starts ChatGPT Pro/Plus browser login.
+- `/limits-sync-models` writes the current OpenAI model catalog to existing account providers so `openai-account-N/<model>` entries show up in OpenCode's model picker.
 - Click any provider row to login, relogin, or remove that provider.
+- Use the `sync models` button on a provider row to refresh the model catalog for one account.
 - In `/limits` or a provider menu, switch between `classic` (default) and `balanced` display modes.
 
 ## Terminal Style

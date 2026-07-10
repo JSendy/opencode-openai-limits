@@ -10,6 +10,7 @@ import {
   REFRESH_REQUEST_FILE,
   accountIDFromClaims,
   accountIDFromTokens,
+  applyOpenAIProviderModelCatalog,
   discoverOpenAIAccounts,
   parseJwtClaims,
   readAuthMap,
@@ -790,5 +791,12 @@ startWriter()
 export const OpenAILimitsWriterPlugin: Plugin = async (input, options) => {
   startWriter()
   const providerID = typeof options?.providerID === "string" ? options.providerID : undefined
-  return providerID ? codexAuthHooks(input, providerID) : {}
+  if (!providerID) {
+    return {
+      config: async (config) => {
+        applyOpenAIProviderModelCatalog(config)
+      },
+    }
+  }
+  return codexAuthHooks(input, providerID)
 }

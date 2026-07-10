@@ -14,6 +14,7 @@ import {
   addOpenAIProvider,
   isSafeProviderID,
   removeOpenAIProvider,
+  syncOpenAIProviderModels,
   type WindowInfo,
 } from "./openai-limits-shared.ts"
 
@@ -811,6 +812,16 @@ function closeDialog(api: TuiPluginApi) {
   api.ui.dialog.clear()
 }
 
+function syncModels(api: TuiPluginApi, accountID?: string) {
+  try {
+    const result = syncOpenAIProviderModels(accountID)
+    const target = accountID || `${result.updated.length} providers`
+    api.ui.toast({ variant: "success", title: "OpenAI models synced", message: `${target}: ${result.modelCount} models. Restart OpenCode to use them.`, duration: 4500 })
+  } catch (err) {
+    api.ui.toast({ variant: "error", title: "Sync OpenAI models", message: err instanceof Error ? err.message : String(err), duration: 3500 })
+  }
+}
+
 function renderLimitsDialog(api: TuiPluginApi) {
   const Dialog = api.ui.Dialog
   const skin = tone(api)
@@ -820,6 +831,7 @@ function renderLimitsDialog(api: TuiPluginApi) {
       <box paddingBottom={1} paddingLeft={2} paddingRight={2} gap={1} flexDirection="column">
         <LimitsList api={api} controls />
         <box flexDirection="row" gap={1}>
+          <ActionButton api={api} label="sync models" onClick={() => syncModels(api)} />
           <ActionButton api={api} label="close" onClick={() => closeDialog(api)} />
         </box>
         <text fg={skin.muted}>Click provider to login again.</text>
@@ -852,6 +864,7 @@ function renderAccountDialog(api: TuiPluginApi, account: AccountLimit) {
 
         <box flexDirection="row" gap={1}>
           <ActionButton api={api} label={account.status === "missing" ? "login" : "relogin"} primary onClick={() => startProviderLogin(api, account.id, account.name)} />
+          <ActionButton api={api} label="sync models" onClick={() => syncModels(api, account.id)} />
           {canRemoveProvider(account) ? <ActionButton api={api} label="remove" onClick={() => openRemoveProviderDialog(api, account)} /> : null}
           <ActionButton api={api} label="add provider" onClick={() => openAddProviderDialog(api)} />
           <ActionButton api={api} label="close" onClick={() => closeDialog(api)} />
@@ -1011,6 +1024,13 @@ const tui: TuiPlugin = async (api) => {
       category: "Plugin",
       slash: { name: "limits-add" },
       onSelect: () => openAddProviderDialog(api),
+    },
+    {
+      title: "Sync OpenAI account models",
+      value: "plugin.openai-limits.sync-models",
+      category: "Plugin",
+      slash: { name: "limits-sync-models" },
+      onSelect: () => syncModels(api),
     },
   ])
 }
